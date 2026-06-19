@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="RFBDataProject.API/RFBDataProject.API.csproj" />
+  <Project Path="RFBDataProject.Application/RFBDataProject.Application.csproj" />
+  <Project Path="RFBDataProject.Domain/RFBDataProject.Domain.csproj" />
+  <Project Path="RFBDataProject.Infrastructure/RFBDataProject.Infrastructure.csproj" />
+</Solution>

@@ -6,6 +6,19 @@ export type {
   ListHoldingsParams,
   SearchCompaniesParams,
 } from './company'
+export type {
+  BooleanFilterSelection,
+  LookupFilterSelection,
+  RangeFilterSelection,
+  TextFilterSelection,
+} from './filters'
+export {
+  emptyBooleanFilter,
+  emptyLookupFilter,
+  emptyRangeFilter,
+  emptyTextFilter,
+  lookupCodes,
+} from './filters'
 export type { LookupItem, LookupSearchParams } from './lookup'
 export type { IngestionArtifactStatus, IngestionStatus } from './ingestion'
 export type {

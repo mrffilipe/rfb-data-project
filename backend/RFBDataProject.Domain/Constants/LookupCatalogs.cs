@@ -46,9 +46,10 @@ public static class LookupCatalogs
 
     public static readonly IReadOnlyList<LookupEntry> CompanySizes =
     [
-        new("00", "Não informado"),
-        new("01", "Micro empresa"),
-        new("03", "Empresa de pequeno porte"),
-        new("05", "Demais"),
+        new("1", "MEI"),
+        new("2", "Microempresa (ME)"),
+        new("3", "Empresa de Pequeno Porte (EPP)"),
+        new("4", "Empresa de Médio Porte"),
+        new("5", "Empresa de Grande Porte"),
     ];
 }

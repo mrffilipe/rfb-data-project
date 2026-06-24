@@ -20,6 +20,22 @@ async function listStaticLookup(path: string): Promise<LookupItem[]> {
   return unwrapArray(data, normalizeLookupItem)
 }
 
+const lookupListCache = new Map<string, Promise<LookupItem[]>>()
+
+function cachedListLookup(path: string): Promise<LookupItem[]> {
+  const cached = lookupListCache.get(path)
+  if (cached) {
+    return cached
+  }
+
+  const request = listStaticLookup(path).catch((error) => {
+    lookupListCache.delete(path)
+    throw error
+  })
+  lookupListCache.set(path, request)
+  return request
+}
+
 export function listStates(): Promise<LookupItem[]> {
   return listStaticLookup(`${apiPaths.lookups}/states`)
 }
@@ -30,6 +46,14 @@ export function listRegistrationStatuses(): Promise<LookupItem[]> {
 
 export function listCompanySizes(): Promise<LookupItem[]> {
   return listStaticLookup(`${apiPaths.lookups}/company-sizes`)
+}
+
+export function listCnaes(): Promise<LookupItem[]> {
+  return cachedListLookup(`${apiPaths.lookups}/cnaes/all`)
+}
+
+export function listLegalNatures(): Promise<LookupItem[]> {
+  return cachedListLookup(`${apiPaths.lookups}/legal-natures/all`)
 }
 
 export function searchCnaes(params: LookupSearchParams): Promise<PagedResult<LookupItem>> {

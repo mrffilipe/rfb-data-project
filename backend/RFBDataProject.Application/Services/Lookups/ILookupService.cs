@@ -8,6 +8,9 @@ public interface ILookupService
     IReadOnlyList<LookupItemDto> ListRegistrationStatuses();
     IReadOnlyList<LookupItemDto> ListCompanySizes();
 
+    Task<IReadOnlyList<LookupItemDto>> ListCnaesAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<LookupItemDto>> ListLegalNaturesAsync(CancellationToken ct = default);
+
     Task<PagedResult<LookupItemDto>> SearchCnaesAsync(LookupSearchRequest request, CancellationToken ct = default);
     Task<PagedResult<LookupItemDto>> SearchMunicipalitiesAsync(LookupSearchRequest request, CancellationToken ct = default);
     Task<PagedResult<LookupItemDto>> SearchLegalNaturesAsync(LookupSearchRequest request, CancellationToken ct = default);

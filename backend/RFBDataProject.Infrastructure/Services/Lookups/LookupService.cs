@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Caching.Memory;
 using RFBDataProject.Application.Common;
 using RFBDataProject.Application.Exceptions;
 using RFBDataProject.Application.Services.Lookups;
@@ -21,11 +22,16 @@ public sealed class LookupService : ILookupService
 
     private readonly ApplicationDbContext _context;
     private readonly IStagingExecutionResolver _executionResolver;
+    private readonly IMemoryCache _cache;
 
-    public LookupService(ApplicationDbContext context, IStagingExecutionResolver executionResolver)
+    public LookupService(
+        ApplicationDbContext context,
+        IStagingExecutionResolver executionResolver,
+        IMemoryCache cache)
     {
         _context = context;
         _executionResolver = executionResolver;
+        _cache = cache;
     }
 
     public IReadOnlyList<LookupItemDto> ListStates() =>
@@ -36,6 +42,12 @@ public sealed class LookupService : ILookupService
 
     public IReadOnlyList<LookupItemDto> ListCompanySizes() =>
         MapCatalog(LookupCatalogs.CompanySizes);
+
+    public Task<IReadOnlyList<LookupItemDto>> ListCnaesAsync(CancellationToken ct = default) =>
+        ListTableAsync("cnaes", ct);
+
+    public Task<IReadOnlyList<LookupItemDto>> ListLegalNaturesAsync(CancellationToken ct = default) =>
+        ListTableAsync("naturezas", ct);
 
     public Task<PagedResult<LookupItemDto>> SearchCnaesAsync(LookupSearchRequest request, CancellationToken ct = default) =>
         SearchTableAsync("cnaes", request, ct);
@@ -113,6 +125,43 @@ public sealed class LookupService : ILookupService
             Total = total,
             Items = items
         };
+    }
+
+    private async Task<IReadOnlyList<LookupItemDto>> ListTableAsync(string legacyKey, CancellationToken ct)
+    {
+        var executionId = await _executionResolver.GetActiveExecutionIdAsync(ct);
+        var cacheKey = $"lookup:list:{legacyKey}:{executionId}";
+
+        if (_cache.TryGetValue<IReadOnlyList<LookupItemDto>>(cacheKey, out var cached) && cached is not null)
+            return cached;
+
+        var table = TableMap[legacyKey];
+
+        await using var conn = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await conn.OpenAsync(ct);
+
+        var sql = $"""
+            SELECT codigo, descricao FROM {table}
+            WHERE execution_id = @execution_id
+            ORDER BY descricao
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("execution_id", executionId);
+
+        var items = new List<LookupItemDto>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            items.Add(new LookupItemDto
+            {
+                Code = reader.GetString(0),
+                Description = reader.GetString(1)
+            });
+        }
+
+        _cache.Set(cacheKey, items, TimeSpan.FromMinutes(30));
+        return items;
     }
 
     private static IReadOnlyList<LookupItemDto> MapCatalog(IReadOnlyList<LookupCatalogs.LookupEntry> entries) =>

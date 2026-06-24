@@ -7,7 +7,7 @@ import {
 import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react'
 import type { PagedResult } from '../../types/common'
 
-const MIN_SEARCH_LENGTH = 3
+const MIN_SEARCH_LENGTH = 1
 const DEBOUNCE_MS = 300
 const SCROLL_LOAD_THRESHOLD_PX = 8
 
@@ -40,11 +40,12 @@ export function PaginatedAutocomplete<T>({
   required,
   helperText,
   error,
-  noOptionsText = 'Digite pelo menos 3 caracteres para buscar',
+  noOptionsText = 'Digite para buscar',
 }: PaginatedAutocompleteProps<T>) {
   const [inputValue, setInputValue] = useState('')
   const [options, setOptions] = useState<T[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
@@ -58,15 +59,23 @@ export function PaginatedAutocomplete<T>({
         setOptions([])
         setTotal(0)
         setPage(1)
+        setLoadError(null)
         return
       }
 
       setLoading(true)
+      setLoadError(null)
       try {
         const result = await fetchPage(query, pageNumber)
         setTotal(result.total)
         setPage(pageNumber)
         setOptions((prev) => (append ? [...prev, ...result.items] : result.items))
+      } catch {
+        setLoadError('Não foi possível carregar as opções.')
+        if (!append) {
+          setOptions([])
+          setTotal(0)
+        }
       } finally {
         setLoading(false)
       }
@@ -116,6 +125,14 @@ export function PaginatedAutocomplete<T>({
     [hasMore, loading, loadPage, page, searchQuery],
   )
 
+  const resolvedNoOptionsText = loadError
+    ? loadError
+    : inputValue.trim().length > 0 && inputValue.trim().length < MIN_SEARCH_LENGTH
+      ? noOptionsText
+      : loading
+        ? 'Buscando…'
+        : 'Nenhum resultado'
+
   return (
     <Autocomplete
       value={value}
@@ -124,6 +141,11 @@ export function PaginatedAutocomplete<T>({
       onInputChange={(_event, newInputValue, reason) => {
         if (reason === 'clear') {
           onChange(null)
+          setInputValue('')
+          return
+        }
+        if (reason === 'reset' && value) {
+          return
         }
         setInputValue(newInputValue)
       }}
@@ -134,13 +156,7 @@ export function PaginatedAutocomplete<T>({
       getOptionLabel={getOptionLabel}
       isOptionEqualToValue={isOptionEqualToValue}
       renderOption={renderOption}
-      noOptionsText={
-        inputValue.trim().length > 0 && inputValue.trim().length < MIN_SEARCH_LENGTH
-          ? noOptionsText
-          : loading
-            ? 'Buscando…'
-            : 'Nenhum resultado'
-      }
+      noOptionsText={resolvedNoOptionsText}
       slotProps={{
         listbox: {
           onScroll: handleListboxScroll,
@@ -156,8 +172,8 @@ export function PaginatedAutocomplete<T>({
           label={label}
           placeholder={placeholder}
           required={required}
-          helperText={helperText}
-          error={error}
+          helperText={loadError ?? helperText}
+          error={error || loadError !== null}
         />
       )}
     />

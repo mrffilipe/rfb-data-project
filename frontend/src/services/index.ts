@@ -2,7 +2,9 @@ export { getCompanyByCnpj, listCompanies, listHoldings, searchCompanies } from '
 export { checkHealth } from './healthService'
 export { getIngestionStatus, triggerIngestionSync } from './ingestionService'
 export {
+  listCnaes,
   listCompanySizes,
+  listLegalNatures,
   listRegistrationStatuses,
   listStates,
   searchCnaes,

@@ -6,26 +6,34 @@ import {
   CheckboxField,
   DataTable,
   FeedbackAlerts,
+  FilterField,
   FormActions,
   FormGrid,
   FormGridItem,
+  FormSection,
   LookupAutocomplete,
   PageHeader,
-  PaginatedAutocomplete,
   SectionCard,
   TablePaginationBar,
 } from '../components/ui'
 import {
+  listCnaes,
   listCompanySizes,
+  listLegalNatures,
   listRegistrationStatuses,
   listStates,
   searchCompanies,
-  searchCnaes,
-  searchLegalNatures,
 } from '../services'
-import type { CompanySummary, LookupItem } from '../types'
+import type { CompanySummary } from '../types'
+import {
+  emptyBooleanFilter,
+  emptyLookupFilter,
+  emptyRangeFilter,
+  emptyTextFilter,
+  lookupCodes,
+} from '../types'
 import { getApiErrorMessage } from '../utils/apiError'
-import { formatCnpj, formatLookupLabel, resolveLookupDescription, toLookupLabelMap } from '../utils/formatters'
+import { formatCnpj, resolveLookupDescription, toLookupLabelMap } from '../utils/formatters'
 
 const PAGE_SIZE = 20
 
@@ -39,16 +47,20 @@ const companyColumns = [
   { id: 'status', label: 'Situação' },
 ]
 
+const PORTE_HELPER: Record<string, string> = {
+  '4': 'Na base da Receita, consta como Demais.',
+  '5': 'Na base da Receita, consta como Demais.',
+}
+
 export function CompanySearchPage() {
-  const [query, setQuery] = useState('')
-  const [state, setState] = useState<LookupItem | null>(null)
-  const [cnae, setCnae] = useState<LookupItem | null>(null)
-  const [legalNature, setLegalNature] = useState<LookupItem | null>(null)
-  const [companySize, setCompanySize] = useState<LookupItem | null>(null)
-  const [registrationStatus, setRegistrationStatus] = useState<LookupItem | null>(null)
-  const [headOfficeOnly, setHeadOfficeOnly] = useState(false)
-  const [shareCapitalMin, setShareCapitalMin] = useState('')
-  const [shareCapitalMax, setShareCapitalMax] = useState('')
+  const [textFilter, setTextFilter] = useState(emptyTextFilter)
+  const [stateFilter, setStateFilter] = useState(emptyLookupFilter)
+  const [cnaeFilter, setCnaeFilter] = useState(emptyLookupFilter)
+  const [legalNatureFilter, setLegalNatureFilter] = useState(emptyLookupFilter)
+  const [companySizeFilter, setCompanySizeFilter] = useState(emptyLookupFilter)
+  const [registrationStatusFilter, setRegistrationStatusFilter] = useState(emptyLookupFilter)
+  const [capitalFilter, setCapitalFilter] = useState(emptyRangeFilter)
+  const [headOfficeFilter, setHeadOfficeFilter] = useState(emptyBooleanFilter)
   const [registrationStatusLabels, setRegistrationStatusLabels] = useState<Map<string, string>>(new Map())
 
   const [items, setItems] = useState<CompanySummary[]>([])
@@ -60,20 +72,10 @@ export function CompanySearchPage() {
   const [searched, setSearched] = useState(false)
 
   const loadStates = useCallback(() => listStates(), [])
+  const loadCnaes = useCallback(() => listCnaes(), [])
+  const loadLegalNatures = useCallback(() => listLegalNatures(), [])
   const loadCompanySizes = useCallback(() => listCompanySizes(), [])
   const loadRegistrationStatuses = useCallback(() => listRegistrationStatuses(), [])
-
-  const fetchCnaes = useCallback(
-    (searchQuery: string, pageNumber: number) =>
-      searchCnaes({ query: searchQuery, page: pageNumber, pageSize: 20 }),
-    [],
-  )
-
-  const fetchLegalNatures = useCallback(
-    (searchQuery: string, pageNumber: number) =>
-      searchLegalNatures({ query: searchQuery, page: pageNumber, pageSize: 20 }),
-    [],
-  )
 
   useEffect(() => {
     void listRegistrationStatuses().then((statuses) => {
@@ -86,15 +88,24 @@ export function CompanySearchPage() {
     setError(null)
     try {
       const result = await searchCompanies({
-        query: query.trim() || undefined,
-        stateCode: state?.code,
-        cnae: cnae?.code,
-        legalNatureCode: legalNature?.code,
-        companySizeCode: companySize?.code,
-        registrationStatus: registrationStatus?.code,
-        headOfficeOnly,
-        shareCapitalMin: shareCapitalMin ? Number(shareCapitalMin) : undefined,
-        shareCapitalMax: shareCapitalMax ? Number(shareCapitalMax) : undefined,
+        query: textFilter.value.trim() || undefined,
+        excludeQuery: textFilter.exclude && Boolean(textFilter.value.trim()),
+        stateCodes: lookupCodes(stateFilter),
+        excludeStates: stateFilter.exclude,
+        cnaes: lookupCodes(cnaeFilter),
+        excludeCnaes: cnaeFilter.exclude,
+        legalNatureCodes: lookupCodes(legalNatureFilter),
+        excludeLegalNatureCodes: legalNatureFilter.exclude,
+        companySizeCodes: lookupCodes(companySizeFilter),
+        excludeCompanySizes: companySizeFilter.exclude,
+        registrationStatuses: lookupCodes(registrationStatusFilter),
+        excludeRegistrationStatuses: registrationStatusFilter.exclude,
+        headOfficeOnly: headOfficeFilter.value || undefined,
+        excludeHeadOfficeOnly: headOfficeFilter.exclude && headOfficeFilter.value,
+        shareCapitalMin: capitalFilter.min ? Number(capitalFilter.min) : undefined,
+        shareCapitalMax: capitalFilter.max ? Number(capitalFilter.max) : undefined,
+        excludeShareCapitalRange:
+          capitalFilter.exclude && Boolean(capitalFilter.min || capitalFilter.max),
         page: targetPage,
         pageSize: PAGE_SIZE,
       })
@@ -115,10 +126,6 @@ export function CompanySearchPage() {
     await runSearch(1)
   }
 
-  async function handlePageChange(nextPage: number): Promise<void> {
-    await runSearch(nextPage)
-  }
-
   return (
     <Stack spacing={3}>
       <PageHeader
@@ -128,90 +135,204 @@ export function CompanySearchPage() {
       <FeedbackAlerts error={error} />
 
       <SectionCard title="Filtros de busca">
-        <Stack component="form" onSubmit={handleSubmit} spacing={2}>
-          <FormGrid>
-            <FormGridItem md={12}>
+        <Stack component="form" onSubmit={handleSubmit} spacing={3}>
+          <FormSection title="Busca por texto" description="Razão social, nome fantasia ou CNPJ">
+            <FilterField
+              helperText="Termo buscado no nome da empresa."
+              exclude={textFilter.exclude}
+              onExcludeChange={(exclude) => setTextFilter((current) => ({ ...current, exclude }))}
+            >
               <TextField
                 label="Texto livre"
                 placeholder="Razão social, nome fantasia ou CNPJ"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                value={textFilter.value}
+                onChange={(event) =>
+                  setTextFilter((current) => ({ ...current, value: event.target.value }))
+                }
                 fullWidth
               />
-            </FormGridItem>
-            <FormGridItem>
-              <LookupAutocomplete
-                label="UF"
-                placeholder="Buscar estado"
-                value={state}
-                onChange={setState}
-                loadOptions={loadStates}
-              />
-            </FormGridItem>
-            <FormGridItem>
-              <PaginatedAutocomplete
-                label="CNAE"
-                value={cnae}
-                onChange={setCnae}
-                fetchPage={fetchCnaes}
-                getOptionLabel={formatLookupLabel}
-                isOptionEqualToValue={(a, b) => a.code === b.code}
-              />
-            </FormGridItem>
-            <FormGridItem>
-              <PaginatedAutocomplete
-                label="Natureza jurídica"
-                value={legalNature}
-                onChange={setLegalNature}
-                fetchPage={fetchLegalNatures}
-                getOptionLabel={formatLookupLabel}
-                isOptionEqualToValue={(a, b) => a.code === b.code}
-              />
-            </FormGridItem>
-            <FormGridItem>
-              <LookupAutocomplete
-                label="Porte"
-                placeholder="Buscar porte"
-                value={companySize}
-                onChange={setCompanySize}
-                loadOptions={loadCompanySizes}
-              />
-            </FormGridItem>
-            <FormGridItem>
-              <LookupAutocomplete
-                label="Situação cadastral"
-                placeholder="Buscar situação"
-                value={registrationStatus}
-                onChange={setRegistrationStatus}
-                loadOptions={loadRegistrationStatuses}
-              />
-            </FormGridItem>
-            <FormGridItem>
-              <TextField
-                label="Capital social mínimo"
-                type="number"
-                value={shareCapitalMin}
-                onChange={(e) => setShareCapitalMin(e.target.value)}
-                fullWidth
-              />
-            </FormGridItem>
-            <FormGridItem>
-              <TextField
-                label="Capital social máximo"
-                type="number"
-                value={shareCapitalMax}
-                onChange={(e) => setShareCapitalMax(e.target.value)}
-                fullWidth
-              />
-            </FormGridItem>
-            <FormGridItem md={12}>
+            </FilterField>
+          </FormSection>
+
+          <FormSection title="Localização" description="Estado do estabelecimento" dividerBefore>
+            <FormGrid>
+              <FormGridItem>
+                <FilterField
+                  helperText="UF onde o estabelecimento está registrado."
+                  exclude={stateFilter.exclude}
+                  onExcludeChange={(exclude) =>
+                    setStateFilter((current) => ({ ...current, exclude }))
+                  }
+                >
+                  <LookupAutocomplete
+                    multiple
+                    label="UF"
+                    placeholder="Selecione um ou mais estados"
+                    value={stateFilter.values}
+                    onChange={(values) =>
+                      setStateFilter((current) => ({ ...current, values }))
+                    }
+                    loadOptions={loadStates}
+                  />
+                </FilterField>
+              </FormGridItem>
+            </FormGrid>
+          </FormSection>
+
+          <FormSection title="Atividade econômica" description="Atividade principal (CNAE fiscal)" dividerBefore>
+            <FormGrid>
+              <FormGridItem md={12}>
+                <FilterField
+                  helperText="CNAE fiscal principal do estabelecimento."
+                  exclude={cnaeFilter.exclude}
+                  onExcludeChange={(exclude) =>
+                    setCnaeFilter((current) => ({ ...current, exclude }))
+                  }
+                >
+                  <LookupAutocomplete
+                    multiple
+                    loadOnOpen
+                    label="CNAE"
+                    placeholder="Selecione um ou mais CNAEs"
+                    value={cnaeFilter.values}
+                    onChange={(values) =>
+                      setCnaeFilter((current) => ({ ...current, values }))
+                    }
+                    loadOptions={loadCnaes}
+                  />
+                </FilterField>
+              </FormGridItem>
+            </FormGrid>
+          </FormSection>
+
+          <FormSection
+            title="Perfil da empresa"
+            description="Tipo jurídico, status na Receita e porte"
+            dividerBefore
+          >
+            <FormGrid>
+              <FormGridItem md={12}>
+                <FilterField
+                  helperText="Código de natureza jurídica da empresa."
+                  exclude={legalNatureFilter.exclude}
+                  onExcludeChange={(exclude) =>
+                    setLegalNatureFilter((current) => ({ ...current, exclude }))
+                  }
+                >
+                  <LookupAutocomplete
+                    multiple
+                    loadOnOpen
+                    label="Natureza jurídica"
+                    placeholder="Selecione uma ou mais naturezas"
+                    value={legalNatureFilter.values}
+                    onChange={(values) =>
+                      setLegalNatureFilter((current) => ({ ...current, values }))
+                    }
+                    loadOptions={loadLegalNatures}
+                  />
+                </FilterField>
+              </FormGridItem>
+              <FormGridItem>
+                <FilterField
+                  helperText="Situação cadastral na Receita Federal."
+                  exclude={registrationStatusFilter.exclude}
+                  onExcludeChange={(exclude) =>
+                    setRegistrationStatusFilter((current) => ({ ...current, exclude }))
+                  }
+                >
+                  <LookupAutocomplete
+                    multiple
+                    label="Situação cadastral"
+                    placeholder="Selecione uma ou mais situações"
+                    value={registrationStatusFilter.values}
+                    onChange={(values) =>
+                      setRegistrationStatusFilter((current) => ({ ...current, values }))
+                    }
+                    loadOptions={loadRegistrationStatuses}
+                  />
+                </FilterField>
+              </FormGridItem>
+              <FormGridItem>
+                <FilterField
+                  helperText="MEI, ME, EPP, médio ou grande porte."
+                  exclude={companySizeFilter.exclude}
+                  onExcludeChange={(exclude) =>
+                    setCompanySizeFilter((current) => ({ ...current, exclude }))
+                  }
+                >
+                  <LookupAutocomplete
+                    multiple
+                    label="Porte"
+                    placeholder="Selecione um ou mais portes"
+                    value={companySizeFilter.values}
+                    onChange={(values) =>
+                      setCompanySizeFilter((current) => ({ ...current, values }))
+                    }
+                    loadOptions={loadCompanySizes}
+                    helperText={
+                      companySizeFilter.values.some((item) => PORTE_HELPER[item.code])
+                        ? PORTE_HELPER[companySizeFilter.values.find((item) => PORTE_HELPER[item.code])!.code]
+                        : undefined
+                    }
+                  />
+                </FilterField>
+              </FormGridItem>
+            </FormGrid>
+          </FormSection>
+
+          <FormSection title="Capital social" description="Valor do capital social declarado (R$)" dividerBefore>
+            <FilterField
+              helperText="Faixa de capital social em reais."
+              exclude={capitalFilter.exclude}
+              onExcludeChange={(exclude) =>
+                setCapitalFilter((current) => ({ ...current, exclude }))
+              }
+            >
+              <FormGrid>
+                <FormGridItem md={6}>
+                  <TextField
+                    label="Capital social mínimo"
+                    type="number"
+                    value={capitalFilter.min}
+                    onChange={(event) =>
+                      setCapitalFilter((current) => ({ ...current, min: event.target.value }))
+                    }
+                    fullWidth
+                  />
+                </FormGridItem>
+                <FormGridItem md={6}>
+                  <TextField
+                    label="Capital social máximo"
+                    type="number"
+                    value={capitalFilter.max}
+                    onChange={(event) =>
+                      setCapitalFilter((current) => ({ ...current, max: event.target.value }))
+                    }
+                    fullWidth
+                  />
+                </FormGridItem>
+              </FormGrid>
+            </FilterField>
+          </FormSection>
+
+          <FormSection title="Estabelecimento" description="Apenas sede (CNPJ matriz)" dividerBefore>
+            <FilterField
+              helperText="Restringe a busca à matriz da empresa."
+              exclude={headOfficeFilter.exclude}
+              onExcludeChange={(exclude) =>
+                setHeadOfficeFilter((current) => ({ ...current, exclude }))
+              }
+            >
               <CheckboxField
                 label="Somente matriz"
-                checked={headOfficeOnly}
-                onCheckedChange={setHeadOfficeOnly}
+                checked={headOfficeFilter.value}
+                onCheckedChange={(value) =>
+                  setHeadOfficeFilter((current) => ({ ...current, value }))
+                }
               />
-            </FormGridItem>
-          </FormGrid>
+            </FilterField>
+          </FormSection>
+
           <FormActions>
             <Button type="submit" variant="contained" startIcon={<SearchIcon />} disabled={loading}>
               Buscar
@@ -255,7 +376,7 @@ export function CompanySearchPage() {
             total={total}
             totalIsApproximate={totalIsApproximate}
             itemsOnPage={items.length}
-            onPageChange={(nextPage) => void handlePageChange(nextPage)}
+            onPageChange={(nextPage) => void runSearch(nextPage)}
             disabled={loading}
           />
         </SectionCard>

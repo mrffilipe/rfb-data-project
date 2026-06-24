@@ -23,6 +23,18 @@ public sealed class LookupsController : V1ApiControllerBase
     [ProducesResponseType(typeof(IReadOnlyList<LookupItemDto>), StatusCodes.Status200OK)]
     public IReadOnlyList<LookupItemDto> ListCompanySizes() => _lookupService.ListCompanySizes();
 
+    [HttpGet("cnaes/all")]
+    [HttpGet("cnaes/list")]
+    [ProducesResponseType(typeof(IReadOnlyList<LookupItemDto>), StatusCodes.Status200OK)]
+    public async Task<IReadOnlyList<LookupItemDto>> ListCnaes(CancellationToken ct) =>
+        await _lookupService.ListCnaesAsync(ct);
+
+    [HttpGet("legal-natures/all")]
+    [HttpGet("legal-natures/list")]
+    [ProducesResponseType(typeof(IReadOnlyList<LookupItemDto>), StatusCodes.Status200OK)]
+    public async Task<IReadOnlyList<LookupItemDto>> ListLegalNatures(CancellationToken ct) =>
+        await _lookupService.ListLegalNaturesAsync(ct);
+
     [HttpGet("cnaes")]
     [ProducesResponseType(typeof(PagedResult<LookupItemDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<LookupItemDto>> SearchCnaes([FromQuery] LookupSearchRequest request, CancellationToken ct)

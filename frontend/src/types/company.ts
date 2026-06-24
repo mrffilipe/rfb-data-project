@@ -34,23 +34,35 @@ export interface CompanyDetail {
 
 export interface SearchCompaniesParams {
   query?: string
-  stateCode?: string
-  cnae?: string
-  legalNatureCode?: string
-  companySizeCode?: string
-  registrationStatus?: string
+  excludeQuery?: boolean
+  stateCodes?: string[]
+  excludeStates?: boolean
+  cnaes?: string[]
+  excludeCnaes?: boolean
+  legalNatureCodes?: string[]
+  excludeLegalNatureCodes?: boolean
+  companySizeCodes?: string[]
+  excludeCompanySizes?: boolean
+  registrationStatuses?: string[]
+  excludeRegistrationStatuses?: boolean
   headOfficeOnly?: boolean
+  excludeHeadOfficeOnly?: boolean
   shareCapitalMin?: number
   shareCapitalMax?: number
+  excludeShareCapitalRange?: boolean
   page?: number
   pageSize?: number
 }
 
 export interface ListCompaniesParams {
-  stateCode?: string
-  cnae?: string
-  legalNatureCode?: string
+  stateCodes?: string[]
+  excludeStates?: boolean
+  cnaes?: string[]
+  excludeCnaes?: boolean
+  legalNatureCodes?: string[]
+  excludeLegalNatureCodes?: boolean
   headOfficeOnly?: boolean
+  excludeHeadOfficeOnly?: boolean
   page?: number
   pageSize?: number
 }

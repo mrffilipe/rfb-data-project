@@ -1,4 +1,5 @@
 using RFBDataProject.Domain.Entities;
+using RFBDataProject.Domain.Enums;
 using RFBDataProject.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,6 +15,11 @@ public sealed class IngestionRunRepository : IIngestionRunRepository
         _context.IngestionRuns
             .OrderByDescending(x => x.StartedAt)
             .FirstOrDefaultAsync(ct);
+
+    public async Task<IReadOnlyList<IngestionRun>> GetStaleRunningAsync(DateTime olderThan, CancellationToken ct = default) =>
+        await _context.IngestionRuns
+            .Where(x => x.Status == IngestionRunStatus.Running && x.StartedAt < olderThan)
+            .ToListAsync(ct);
 
     public async Task AddAsync(IngestionRun run, CancellationToken ct = default) =>
         await _context.IngestionRuns.AddAsync(run, ct);

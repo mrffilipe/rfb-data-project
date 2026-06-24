@@ -1,4 +1,5 @@
 using RFBDataProject.Infrastructure.Configurations;
+using RFBDataProject.Infrastructure.Ingestion;
 using RFBDataProject.Infrastructure.Persistence;
 using RFBDataProject.Infrastructure.Workers;
 using Microsoft.EntityFrameworkCore;
@@ -42,6 +43,8 @@ public static class ServiceCollectionExtensions
             services.AddDistributedMemoryCache();
         }
 
+        services.AddMemoryCache();
+
         var connectionString = configuration.GetSection(DatabaseOptions.SECTION).Get<DatabaseOptions>()?.ConnectionString
             ?? throw new InvalidOperationException(InfrastructureErrorMessages.Database.CONNECTION_STRING_REQUIRED);
 
@@ -54,6 +57,7 @@ public static class ServiceCollectionExtensions
         services.AddAggregateServices();
         services.AddServices();
         services.AddHostedService<IngestionBackgroundService>();
+        services.AddHostedService<StagingIndexBackgroundService>();
 
         return services;
     }

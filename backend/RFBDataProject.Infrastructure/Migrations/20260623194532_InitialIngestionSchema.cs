@@ -6,11 +6,34 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace RFBDataProject.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialIngestionSchema : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.CreateTable(
+                name: "import_executions",
+                columns: table => new
+                {
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    run_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    referencia_receita = table.Column<string>(type: "character varying(10)", maxLength: 10, nullable: false),
+                    status = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    data_inicio = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    data_fim = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    quantidade_processada = table.Column<long>(type: "bigint", nullable: false),
+                    quantidade_inserida = table.Column<long>(type: "bigint", nullable: false),
+                    quantidade_atualizada = table.Column<long>(type: "bigint", nullable: false),
+                    quantidade_ignorada = table.Column<long>(type: "bigint", nullable: false),
+                    erros = table.Column<string>(type: "character varying(4000)", maxLength: 4000, nullable: true),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    updated_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_import_executions", x => x.id);
+                });
+
             migrationBuilder.CreateTable(
                 name: "ingestion_releases",
                 columns: table => new
@@ -78,6 +101,17 @@ namespace RFBDataProject.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_import_executions_data_inicio",
+                table: "import_executions",
+                column: "data_inicio");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_import_executions_run_id",
+                table: "import_executions",
+                column: "run_id",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_ingestion_artifacts_release_id_file_name",
                 table: "ingestion_artifacts",
                 columns: new[] { "release_id", "file_name" },
@@ -108,6 +142,9 @@ namespace RFBDataProject.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "import_executions");
+
             migrationBuilder.DropTable(
                 name: "ingestion_artifacts");
 

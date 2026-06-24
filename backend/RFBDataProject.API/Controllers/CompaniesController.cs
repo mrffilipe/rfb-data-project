@@ -16,18 +16,6 @@ public sealed class CompaniesController : V1ApiControllerBase
         _queryService = queryService;
     }
 
-    [HttpGet("{cnpj}")]
-    [ProducesResponseType(typeof(CompanyDetailDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<CompanyDetailDto>> GetByCnpj(string cnpj, CancellationToken ct)
-    {
-        var result = await _queryService.GetByCnpjAsync(new GetCompanyByCnpjRequest { Cnpj = cnpj }, ct);
-        if (result is null)
-            return NotFound();
-
-        return Ok(result);
-    }
-
     [HttpGet("search")]
     [ProducesResponseType(typeof(PagedResult<CompanySummaryDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<CompanySummaryDto>> Search([FromQuery] SearchCompaniesRequest request, CancellationToken ct)
@@ -47,5 +35,17 @@ public sealed class CompaniesController : V1ApiControllerBase
     public async Task<PagedResult<CompanySummaryDto>> Holdings([FromQuery] ListHoldingsRequest request, CancellationToken ct)
     {
         return await _queryService.ListHoldingsAsync(request, ct);
+    }
+
+    [HttpGet("{cnpj:regex(^\\d{{14}}$)}")]
+    [ProducesResponseType(typeof(CompanyDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CompanyDetailDto>> GetByCnpj(string cnpj, CancellationToken ct)
+    {
+        var result = await _queryService.GetByCnpjAsync(new GetCompanyByCnpjRequest { Cnpj = cnpj }, ct);
+        if (result is null)
+            return NotFound();
+
+        return Ok(result);
     }
 }

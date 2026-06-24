@@ -3,6 +3,7 @@ export interface PagedResult<T> {
   total: number
   page: number
   pageSize: number
+  totalIsApproximate?: boolean
 }
 
 export interface ProblemDetails {

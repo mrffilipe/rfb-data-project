@@ -32,17 +32,19 @@ public sealed class RfbDownloadService : IRfbDownloadService
         return response.Content.Headers.ContentLength;
     }
 
-    public async Task<Stream> DownloadToTempFileStreamAsync(string url, CancellationToken ct = default)
+    public async Task<Stream> DownloadAsStreamAsync(string url, CancellationToken ct = default)
     {
         var client = CreateClient();
-        var tempPath = Path.Combine(Path.GetTempPath(), $"rfb_{Guid.NewGuid():N}.zip");
 
         for (var attempt = 1; attempt <= _options.MaxDownloadRetries; attempt++)
         {
             try
             {
-                await DownloadWithResumeAsync(client, url, tempPath, ct);
-                return new TempFileStream(tempPath);
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                response.EnsureSuccessStatusCode();
+                var network = await response.Content.ReadAsStreamAsync(ct);
+                return new HttpResponseStream(network, response);
             }
             catch (Exception ex) when (attempt < _options.MaxDownloadRetries)
             {
@@ -51,33 +53,11 @@ public sealed class RfbDownloadService : IRfbDownloadService
             }
         }
 
-        await DownloadWithResumeAsync(client, url, tempPath, ct);
-        return new TempFileStream(tempPath);
-    }
-
-    private static async Task DownloadWithResumeAsync(HttpClient client, string url, string tempPath, CancellationToken ct)
-    {
-        long offset = 0;
-        if (File.Exists(tempPath))
-            offset = new FileInfo(tempPath).Length;
-
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        if (offset > 0)
-            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(offset, null);
-
-        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
-
-        await using var network = await response.Content.ReadAsStreamAsync(ct);
-        await using var file = new FileStream(
-            tempPath,
-            offset > 0 ? FileMode.Append : FileMode.Create,
-            FileAccess.Write,
-            FileShare.None,
-            1024 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-        await network.CopyToAsync(file, ct);
+        var finalRequest = new HttpRequestMessage(HttpMethod.Get, url);
+        var finalResponse = await client.SendAsync(finalRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+        finalResponse.EnsureSuccessStatusCode();
+        var finalStream = await finalResponse.Content.ReadAsStreamAsync(ct);
+        return new HttpResponseStream(finalStream, finalResponse);
     }
 
     private HttpClient CreateClient()
@@ -88,28 +68,42 @@ public sealed class RfbDownloadService : IRfbDownloadService
         return client;
     }
 
-    private sealed class TempFileStream : FileStream
+    private sealed class HttpResponseStream : Stream
     {
-        private readonly string _path;
+        private readonly Stream _inner;
+        private readonly HttpResponseMessage _response;
+        private bool _disposed;
 
-        public TempFileStream(string path)
-            : base(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.DeleteOnClose | FileOptions.Asynchronous)
+        public HttpResponseStream(Stream inner, HttpResponseMessage response)
         {
-            _path = path;
+            _inner = inner;
+            _response = response;
         }
+
+        public override bool CanRead => _inner.CanRead;
+        public override bool CanSeek => _inner.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length => _inner.Length;
+        public override long Position { get => _inner.Position; set => _inner.Position = value; }
+        public override void Flush() => _inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+        public override void SetLength(long value) => _inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
         protected override void Dispose(bool disposing)
         {
+            if (_disposed)
+                return;
+
+            if (disposing)
+            {
+                _inner.Dispose();
+                _response.Dispose();
+            }
+
+            _disposed = true;
             base.Dispose(disposing);
-            try
-            {
-                if (File.Exists(_path))
-                    File.Delete(_path);
-            }
-            catch
-            {
-                // Best effort cleanup.
-            }
         }
     }
 }

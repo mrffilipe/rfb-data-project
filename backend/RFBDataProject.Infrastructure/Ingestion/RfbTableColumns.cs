@@ -39,8 +39,22 @@ public static class RfbTableColumns
         [RfbTableNames.Qualifications] = ["codigo", "descricao"]
     };
 
-    public static string[] GetColumns(string tableName) =>
-        Columns.TryGetValue(tableName, out var cols)
+    public static string[] GetColumns(string targetTable) =>
+        Columns.TryGetValue(targetTable, out var cols)
             ? cols
-            : throw new ArgumentException($"Unknown table: {tableName}", nameof(tableName));
+            : throw new ArgumentException($"Unknown table: {targetTable}", nameof(targetTable));
+
+    public static string[] GetStagingDataColumns(string targetTable) => GetColumns(targetTable);
+
+    public static string[] GetStagingCopyColumns(string targetTable)
+    {
+        var data = GetColumns(targetTable);
+        var result = new string[data.Length + 1];
+        result[0] = "execution_id";
+        Array.Copy(data, 0, result, 1, data.Length);
+        return result;
+    }
+
+    public static string GetStagingTable(string targetTable) =>
+        StagingTableNames.FromTargetTable(targetTable);
 }

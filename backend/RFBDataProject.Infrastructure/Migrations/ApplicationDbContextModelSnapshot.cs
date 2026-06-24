@@ -22,6 +22,76 @@ namespace RFBDataProject.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("RFBDataProject.Domain.Entities.ImportExecution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("data_fim");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Errors")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("erros");
+
+                    b.Property<long>("IgnoredCount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("quantidade_ignorada");
+
+                    b.Property<long>("InsertedCount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("quantidade_inserida");
+
+                    b.Property<long>("ProcessedCount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("quantidade_processada");
+
+                    b.Property<string>("ReferencePeriod")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("referencia_receita");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("run_id");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("data_inicio");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<long>("UpdatedCount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("quantidade_atualizada");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId")
+                        .IsUnique();
+
+                    b.HasIndex("StartedAt");
+
+                    b.ToTable("import_executions", (string)null);
+                });
+
             modelBuilder.Entity("RFBDataProject.Domain.Entities.IngestionArtifact", b =>
                 {
                     b.Property<Guid>("Id")

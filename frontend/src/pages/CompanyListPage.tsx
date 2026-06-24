@@ -41,6 +41,7 @@ export function CompanyListPage() {
   const [items, setItems] = useState<CompanySummary[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
+  const [totalIsApproximate, setTotalIsApproximate] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searched, setSearched] = useState(false)
@@ -79,6 +80,7 @@ export function CompanyListPage() {
       })
       setItems(result.items)
       setTotal(result.total)
+      setTotalIsApproximate(result.totalIsApproximate ?? false)
       setPage(result.page)
       setSearched(true)
     } catch (searchError) {
@@ -176,6 +178,8 @@ export function CompanyListPage() {
             page={page}
             pageSize={PAGE_SIZE}
             total={total}
+            totalIsApproximate={totalIsApproximate}
+            itemsOnPage={items.length}
             onPageChange={(nextPage) => void runSearch(nextPage)}
             disabled={loading}
           />

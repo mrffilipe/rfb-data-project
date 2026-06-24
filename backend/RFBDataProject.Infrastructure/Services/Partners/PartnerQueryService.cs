@@ -4,6 +4,7 @@ using RFBDataProject.Application.Services.Companies;
 using RFBDataProject.Application.Services.Partners;
 using RFBDataProject.Domain.Rules;
 using RFBDataProject.Infrastructure.Persistence;
+using RFBDataProject.Infrastructure.Services.Staging;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -12,8 +13,13 @@ namespace RFBDataProject.Infrastructure.Services.Partners;
 public sealed class PartnerQueryService : IPartnerQueryService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IStagingExecutionResolver _executionResolver;
 
-    public PartnerQueryService(ApplicationDbContext context) => _context = context;
+    public PartnerQueryService(ApplicationDbContext context, IStagingExecutionResolver executionResolver)
+    {
+        _context = context;
+        _executionResolver = executionResolver;
+    }
 
     public async Task<PagedResult<CompanySummaryDto>> GetCompaniesByPartnerAsync(
         GetCompaniesByPartnerRequest request,
@@ -24,39 +30,52 @@ public sealed class PartnerQueryService : IPartnerQueryService
         if (string.IsNullOrEmpty(doc))
             throw new ApplicationValidationException(ApplicationErrorMessages.Search.QUERY_TOO_SHORT);
 
-        var offset = (request.Page - 1) * request.PageSize;
+        var executionId = await _executionResolver.GetActiveExecutionIdAsync(ct);
         await using var conn = new NpgsqlConnection(_context.Database.GetConnectionString());
         await conn.OpenAsync(ct);
 
         const string countSql = """
-            SELECT COUNT(DISTINCT est.cnpj_basico || est.cnpj_ordem || est.cnpj_dv)
-            FROM socios s
-            JOIN empresas e ON e.cnpj_basico = s.cnpj_basico
-            JOIN estabelecimentos est ON est.cnpj_basico = s.cnpj_basico AND est.identificador_matriz_filial = '1'
-            WHERE s.cnpj_cpf_socio = @doc
+            SELECT COUNT(DISTINCT e.cnpj_basico || e.cnpj_ordem || e.cnpj_dv)
+            FROM receita_socio_staging p
+            JOIN receita_empresa_staging c
+                ON c.cnpj_basico = p.cnpj_basico AND c.execution_id = p.execution_id
+            JOIN receita_estabelecimento_staging e
+                ON e.cnpj_basico = p.cnpj_basico
+               AND e.execution_id = p.execution_id
+               AND e.identificador_matriz_filial = '1'
+            WHERE p.cnpj_cpf_socio = @doc
+              AND p.execution_id = @execution_id
             """;
 
         const string sql = """
-            SELECT DISTINCT est.cnpj_basico || est.cnpj_ordem || est.cnpj_dv,
-                   e.razao_social, est.nome_fantasia, est.uf, m.descricao,
-                   est.cnae_fiscal_principal, NULL, est.situacao_cadastral
-            FROM socios s
-            JOIN empresas e ON e.cnpj_basico = s.cnpj_basico
-            JOIN estabelecimentos est ON est.cnpj_basico = s.cnpj_basico AND est.identificador_matriz_filial = '1'
-            LEFT JOIN municipios m ON m.codigo = est.municipio
-            WHERE s.cnpj_cpf_socio = @doc
+            SELECT DISTINCT e.cnpj_basico || e.cnpj_ordem || e.cnpj_dv,
+                   c.razao_social, e.nome_fantasia, e.uf, m.descricao,
+                   e.cnae_fiscal_principal, NULL, e.situacao_cadastral
+            FROM receita_socio_staging p
+            JOIN receita_empresa_staging c
+                ON c.cnpj_basico = p.cnpj_basico AND c.execution_id = p.execution_id
+            JOIN receita_estabelecimento_staging e
+                ON e.cnpj_basico = p.cnpj_basico
+               AND e.execution_id = p.execution_id
+               AND e.identificador_matriz_filial = '1'
+            LEFT JOIN receita_municipio_staging m
+                ON m.codigo = e.municipio AND m.execution_id = p.execution_id
+            WHERE p.cnpj_cpf_socio = @doc
+              AND p.execution_id = @execution_id
             ORDER BY 1
             LIMIT @limit OFFSET @offset
             """;
 
         await using var countCmd = new NpgsqlCommand(countSql, conn);
         countCmd.Parameters.AddWithValue("doc", doc);
+        countCmd.Parameters.AddWithValue("execution_id", executionId);
         var total = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct) ?? 0);
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("doc", doc);
+        cmd.Parameters.AddWithValue("execution_id", executionId);
         cmd.Parameters.AddWithValue("limit", request.PageSize);
-        cmd.Parameters.AddWithValue("offset", offset);
+        cmd.Parameters.AddWithValue("offset", (request.Page - 1) * request.PageSize);
 
         var items = await ReadCompanySummaryAsync(cmd, ct);
         return BuildPagedResult(items, request, total);
@@ -68,26 +87,31 @@ public sealed class PartnerQueryService : IPartnerQueryService
         var cnpj = CnpjValidationRules.NormalizeDigits(request.Cnpj);
         CnpjValidationRules.ValidateCnpj(cnpj);
         var basico = cnpj[..8];
+        var executionId = await _executionResolver.GetActiveExecutionIdAsync(ct);
 
-        var offset = (request.Page - 1) * request.PageSize;
         await using var conn = new NpgsqlConnection(_context.Database.GetConnectionString());
         await conn.OpenAsync(ct);
 
-        await using var countCmd = new NpgsqlCommand("SELECT COUNT(*) FROM socios WHERE cnpj_basico = @basico", conn);
+        await using var countCmd = new NpgsqlCommand(
+            "SELECT COUNT(*) FROM receita_socio_staging WHERE cnpj_basico = @basico AND execution_id = @execution_id",
+            conn);
         countCmd.Parameters.AddWithValue("basico", basico);
+        countCmd.Parameters.AddWithValue("execution_id", executionId);
         var total = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct) ?? 0);
 
         await using var cmd = new NpgsqlCommand(
             """
             SELECT cnpj_basico, nome_socio, identificador_socio, cnpj_cpf_socio,
                    qualificacao_socio, data_entrada_sociedade
-            FROM socios WHERE cnpj_basico = @basico
+            FROM receita_socio_staging
+            WHERE cnpj_basico = @basico AND execution_id = @execution_id
             ORDER BY nome_socio
             LIMIT @limit OFFSET @offset
             """, conn);
         cmd.Parameters.AddWithValue("basico", basico);
+        cmd.Parameters.AddWithValue("execution_id", executionId);
         cmd.Parameters.AddWithValue("limit", request.PageSize);
-        cmd.Parameters.AddWithValue("offset", offset);
+        cmd.Parameters.AddWithValue("offset", (request.Page - 1) * request.PageSize);
 
         var items = new List<PartnerDto>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);

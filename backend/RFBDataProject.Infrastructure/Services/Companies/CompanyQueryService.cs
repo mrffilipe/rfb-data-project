@@ -4,6 +4,7 @@ using RFBDataProject.Application.Services.Companies;
 using RFBDataProject.Domain.Rules;
 using RFBDataProject.Infrastructure.Persistence;
 using RFBDataProject.Infrastructure.Persistence.Sql;
+using RFBDataProject.Infrastructure.Services.Staging;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -12,25 +13,32 @@ namespace RFBDataProject.Infrastructure.Services.Companies;
 public sealed class CompanyQueryService : ICompanyQueryService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IStagingExecutionResolver _executionResolver;
 
-    public CompanyQueryService(ApplicationDbContext context) => _context = context;
+    public CompanyQueryService(ApplicationDbContext context, IStagingExecutionResolver executionResolver)
+    {
+        _context = context;
+        _executionResolver = executionResolver;
+    }
 
     public async Task<CompanyDetailDto?> GetByCnpjAsync(GetCompanyByCnpjRequest request, CancellationToken ct = default)
     {
         var cnpj = CnpjValidationRules.NormalizeDigits(request.Cnpj);
         CnpjValidationRules.ValidateCnpj(cnpj);
+        var executionId = await _executionResolver.GetActiveExecutionIdAsync(ct);
 
         await using var conn = new NpgsqlConnection(_context.Database.GetConnectionString());
         await conn.OpenAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            """
-            SELECT cnpj, razao_social, nome_fantasia, natureza_juridica, natureza_juridica_desc,
-                   capital_social, porte_empresa, situacao_cadastral, data_inicio_atividade,
-                   cnae_fiscal_principal, cnae_principal_desc, uf, municipio, municipio_desc,
-                   logradouro, numero, bairro, cep, correio_eletronico, telefone_1
-            FROM vw_empresas_completo WHERE cnpj = @cnpj LIMIT 1
-            """, conn);
+            $"""
+             {StagingQuerySql.CompanyCompleteSelect}
+             {StagingQuerySql.CompanyCompleteFrom}
+             WHERE c.execution_id = @execution_id
+               AND c.cnpj_basico || e.cnpj_ordem || e.cnpj_dv = @cnpj
+             LIMIT 1
+             """, conn);
+        cmd.Parameters.AddWithValue("execution_id", executionId);
         cmd.Parameters.AddWithValue("cnpj", cnpj);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -52,15 +60,15 @@ public sealed class CompanyQueryService : ICompanyQueryService
             ActivityStartDate = S(8),
             PrimaryCnaeCode = S(9),
             PrimaryCnaeDescription = S(10),
-            StateCode = S(11),
-            MunicipalityCode = S(12),
-            MunicipalityDescription = S(13),
-            StreetName = S(14),
-            StreetNumber = S(15),
-            Neighborhood = S(16),
-            ZipCode = S(17),
-            Email = S(18),
-            PhoneNumber = S(19)
+            StateCode = S(12),
+            MunicipalityCode = S(13),
+            MunicipalityDescription = S(14),
+            StreetName = S(15),
+            StreetNumber = S(16),
+            Neighborhood = S(17),
+            ZipCode = S(18),
+            Email = S(19),
+            PhoneNumber = S(20)
         };
     }
 
@@ -71,12 +79,13 @@ public sealed class CompanyQueryService : ICompanyQueryService
         if (request.PageSize is < 1 or > 100)
             throw new ApplicationValidationException(ApplicationErrorMessages.Search.INVALID_PAGE_SIZE);
 
+        var executionId = await _executionResolver.GetActiveExecutionIdAsync(ct);
         var offset = (request.Page - 1) * request.PageSize;
         await using var conn = new NpgsqlConnection(_context.Database.GetConnectionString());
         await conn.OpenAsync(ct);
 
         var filters = new List<string>();
-        var parameters = new List<NpgsqlParameter>();
+        var parameters = new List<NpgsqlParameter> { new("execution_id", executionId) };
         if (!string.IsNullOrWhiteSpace(request.StateCode))
         {
             filters.Add("h.uf = @uf");
@@ -84,11 +93,20 @@ public sealed class CompanyQueryService : ICompanyQueryService
         }
 
         var where = filters.Count > 0 ? "WHERE " + string.Join(" AND ", filters) : string.Empty;
-        var countSql = $"SELECT COUNT(*) FROM vw_holdings h {where}";
+        var countSql = $"""
+            SELECT COUNT(*) FROM (
+                {StagingQuerySql.HoldingsSelect}
+                {StagingQuerySql.HoldingsFrom}
+            ) h {where}
+            """;
         var sql = $"""
             SELECT h.cnpj, h.razao_social, NULL, h.uf, m.descricao, h.cnae_fiscal_principal, NULL, NULL
-            FROM vw_holdings h
-            LEFT JOIN municipios m ON m.codigo = h.municipio
+            FROM (
+                {StagingQuerySql.HoldingsSelect}
+                {StagingQuerySql.HoldingsFrom}
+            ) h
+            LEFT JOIN receita_municipio_staging m
+                ON m.codigo = h.municipio AND m.execution_id = @execution_id
             {where}
             ORDER BY h.cnpj
             LIMIT @limit OFFSET @offset

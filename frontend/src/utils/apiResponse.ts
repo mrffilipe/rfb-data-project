@@ -43,6 +43,7 @@ export function unwrapPagedResult<T>(raw: unknown, mapItem: (item: unknown) => T
     total: Number(record.total ?? record.Total ?? items.length),
     page: Number(record.page ?? record.Page ?? 1),
     pageSize: Number(record.pageSize ?? record.PageSize ?? 20),
+    totalIsApproximate: Boolean(record.totalIsApproximate ?? record.TotalIsApproximate ?? false),
   }
 }
 

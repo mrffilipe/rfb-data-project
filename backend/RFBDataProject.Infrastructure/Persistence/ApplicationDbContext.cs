@@ -9,6 +9,7 @@ public sealed class ApplicationDbContext : DbContext
     public DbSet<IngestionRelease> IngestionReleases => Set<IngestionRelease>();
     public DbSet<IngestionArtifact> IngestionArtifacts => Set<IngestionArtifact>();
     public DbSet<IngestionRun> IngestionRuns => Set<IngestionRun>();
+    public DbSet<ImportExecution> ImportExecutions => Set<ImportExecution>();
 
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
     {

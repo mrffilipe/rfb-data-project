@@ -10,6 +10,7 @@ using RFBDataProject.Infrastructure.Services.Ingestion;
 using RFBDataProject.Infrastructure.Services.Lookups;
 using RFBDataProject.Infrastructure.Services.Participations;
 using RFBDataProject.Infrastructure.Services.Partners;
+using RFBDataProject.Infrastructure.Services.Staging;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace RFBDataProject.Infrastructure.Extensions;
@@ -21,6 +22,7 @@ public static class AggregateServiceExtensions
         services.AddScoped<IIngestionService, IngestionService>();
         services.AddScoped<IRfbDiscoveryService, RfbDiscoveryService>();
         services.AddScoped<IRfbDownloadService, RfbDownloadService>();
+        services.AddScoped<IStagingExecutionResolver, StagingExecutionResolver>();
         services.AddScoped<ICompanySearchService, CompanySearchService>();
         services.AddScoped<ICompanyQueryService, CompanyQueryService>();
         services.AddScoped<IPartnerQueryService, PartnerQueryService>();

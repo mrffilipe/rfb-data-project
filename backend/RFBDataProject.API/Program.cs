@@ -34,6 +34,7 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     await db.Database.MigrateAsync();
     await scope.ServiceProvider.GetRequiredService<ICnpjBulkRepository>().EnsureSchemaAsync();
+    app.Logger.LogInformation("Database migrations and staging table bootstrap completed.");
 }
 
 app.UseMiddleware<ApplicationExceptionMiddleware>();

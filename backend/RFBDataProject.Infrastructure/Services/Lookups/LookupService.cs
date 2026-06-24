@@ -3,6 +3,7 @@ using RFBDataProject.Application.Exceptions;
 using RFBDataProject.Application.Services.Lookups;
 using RFBDataProject.Domain.Constants;
 using RFBDataProject.Infrastructure.Persistence;
+using RFBDataProject.Infrastructure.Services.Staging;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -10,9 +11,22 @@ namespace RFBDataProject.Infrastructure.Services.Lookups;
 
 public sealed class LookupService : ILookupService
 {
-    private readonly ApplicationDbContext _context;
+    private static readonly IReadOnlyDictionary<string, string> TableMap = new Dictionary<string, string>
+    {
+        ["cnaes"] = StagingTableNames.Cnae,
+        ["municipios"] = StagingTableNames.Municipio,
+        ["naturezas"] = StagingTableNames.Natureza,
+        ["qualificacoes"] = StagingTableNames.Qualificacao
+    };
 
-    public LookupService(ApplicationDbContext context) => _context = context;
+    private readonly ApplicationDbContext _context;
+    private readonly IStagingExecutionResolver _executionResolver;
+
+    public LookupService(ApplicationDbContext context, IStagingExecutionResolver executionResolver)
+    {
+        _context = context;
+        _executionResolver = executionResolver;
+    }
 
     public IReadOnlyList<LookupItemDto> ListStates() =>
         MapCatalog(LookupCatalogs.BrazilianStates);
@@ -36,7 +50,7 @@ public sealed class LookupService : ILookupService
         SearchTableAsync("qualificacoes", request, ct);
 
     private async Task<PagedResult<LookupItemDto>> SearchTableAsync(
-        string table,
+        string legacyKey,
         LookupSearchRequest request,
         CancellationToken ct)
     {
@@ -47,6 +61,8 @@ public sealed class LookupService : ILookupService
         if (string.IsNullOrWhiteSpace(request.Query))
             throw new ApplicationValidationException(ApplicationErrorMessages.Lookup.QUERY_TOO_SHORT);
 
+        var executionId = await _executionResolver.GetActiveExecutionIdAsync(ct);
+        var table = TableMap[legacyKey];
         var q = request.Query.Trim();
         var pattern = $"%{q}%";
         var offset = (request.Page - 1) * request.PageSize;
@@ -56,21 +72,25 @@ public sealed class LookupService : ILookupService
 
         var countSql = $"""
             SELECT COUNT(*) FROM {table}
-            WHERE codigo ILIKE @q OR descricao ILIKE @q
+            WHERE execution_id = @execution_id
+              AND (codigo ILIKE @q OR descricao ILIKE @q)
             """;
 
         var sql = $"""
             SELECT codigo, descricao FROM {table}
-            WHERE codigo ILIKE @q OR descricao ILIKE @q
+            WHERE execution_id = @execution_id
+              AND (codigo ILIKE @q OR descricao ILIKE @q)
             ORDER BY descricao
             LIMIT @limit OFFSET @offset
             """;
 
         await using var countCmd = new NpgsqlCommand(countSql, conn);
+        countCmd.Parameters.AddWithValue("execution_id", executionId);
         countCmd.Parameters.AddWithValue("q", pattern);
         var total = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct) ?? 0);
 
         await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("execution_id", executionId);
         cmd.Parameters.AddWithValue("q", pattern);
         cmd.Parameters.AddWithValue("limit", request.PageSize);
         cmd.Parameters.AddWithValue("offset", offset);

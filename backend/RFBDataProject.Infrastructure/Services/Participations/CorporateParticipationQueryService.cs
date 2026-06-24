@@ -4,6 +4,7 @@ using RFBDataProject.Application.Services.Participations;
 using RFBDataProject.Domain.Rules;
 using RFBDataProject.Infrastructure.Persistence;
 using RFBDataProject.Infrastructure.Persistence.Sql;
+using RFBDataProject.Infrastructure.Services.Staging;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -12,8 +13,15 @@ namespace RFBDataProject.Infrastructure.Services.Participations;
 public sealed class CorporateParticipationQueryService : ICorporateParticipationQueryService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IStagingExecutionResolver _executionResolver;
 
-    public CorporateParticipationQueryService(ApplicationDbContext context) => _context = context;
+    public CorporateParticipationQueryService(
+        ApplicationDbContext context,
+        IStagingExecutionResolver executionResolver)
+    {
+        _context = context;
+        _executionResolver = executionResolver;
+    }
 
     public async Task<PagedResult<CorporateParticipationDto>> ListAsync(
         ListCorporateParticipationsRequest request,
@@ -24,12 +32,12 @@ public sealed class CorporateParticipationQueryService : ICorporateParticipation
         if (request.PageSize is < 1 or > 100)
             throw new ApplicationValidationException(ApplicationErrorMessages.Search.INVALID_PAGE_SIZE);
 
-        var offset = (request.Page - 1) * request.PageSize;
+        var executionId = await _executionResolver.GetActiveExecutionIdAsync(ct);
         await using var conn = new NpgsqlConnection(_context.Database.GetConnectionString());
         await conn.OpenAsync(ct);
 
         var filters = new List<string>();
-        var parameters = new List<NpgsqlParameter>();
+        var parameters = new List<NpgsqlParameter> { new("execution_id", executionId) };
 
         if (!string.IsNullOrWhiteSpace(request.ControllingCnpj))
         {
@@ -43,19 +51,24 @@ public sealed class CorporateParticipationQueryService : ICorporateParticipation
             parameters.Add(new NpgsqlParameter("controlada", CnpjValidationRules.NormalizeDigits(request.ControlledCnpj)[..8]));
         }
 
+        var subquery = $"""
+            {StagingQuerySql.CorporateParticipationsSelect}
+            {StagingQuerySql.CorporateParticipationsFrom}
+            """;
+
         var where = filters.Count > 0 ? "WHERE " + string.Join(" AND ", filters) : string.Empty;
-        var countSql = $"SELECT COUNT(*) FROM vw_participacoes_pj {where}";
+        var countSql = $"SELECT COUNT(*) FROM ({subquery}) participations {where}";
         var sql = $"""
             SELECT cnpj_controlada_basico, cnpj_controladora, razao_controladora,
                    qualificacao_socio, data_entrada_sociedade, razao_controlada
-            FROM vw_participacoes_pj
+            FROM ({subquery}) participations
             {where}
             ORDER BY cnpj_controladora, cnpj_controlada_basico
             LIMIT @limit OFFSET @offset
             """;
 
         parameters.Add(new NpgsqlParameter("limit", request.PageSize));
-        parameters.Add(new NpgsqlParameter("offset", offset));
+        parameters.Add(new NpgsqlParameter("offset", (request.Page - 1) * request.PageSize));
 
         await using var countCmd = new NpgsqlCommand(countSql, conn);
         NpgsqlCommandBinder.AddParameters(countCmd, parameters, excludePaging: true);

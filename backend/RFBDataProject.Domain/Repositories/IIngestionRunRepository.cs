@@ -5,6 +5,7 @@ namespace RFBDataProject.Domain.Repositories;
 public interface IIngestionRunRepository
 {
     Task<IngestionRun?> GetLatestRunAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<IngestionRun>> GetStaleRunningAsync(DateTime olderThan, CancellationToken ct = default);
     Task AddAsync(IngestionRun run, CancellationToken ct = default);
     void Update(IngestionRun run);
 }

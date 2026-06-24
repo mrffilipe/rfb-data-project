@@ -13,6 +13,18 @@ public sealed class RfbOptionsValidator : IValidateOptions<RfbOptions>
         if (options.DownloadParallelism is < 1 or > 16)
             return ValidateOptionsResult.Fail(InfrastructureErrorMessages.Rfb.INVALID_PARALLELISM);
 
+        if (options.ParserParallelism is < 1 or > 16)
+            return ValidateOptionsResult.Fail(InfrastructureErrorMessages.Rfb.INVALID_PARSER_PARALLELISM);
+
+        if (options.StagingWriterParallelism is < 1 or > 16)
+            return ValidateOptionsResult.Fail(InfrastructureErrorMessages.Rfb.INVALID_STAGING_PARALLELISM);
+
+        if (options.ChannelCapacity is < 100 or > 1_000_000)
+            return ValidateOptionsResult.Fail(InfrastructureErrorMessages.Rfb.INVALID_CHANNEL_CAPACITY);
+
+        if (options.StagingBatchSize is < 100 or > 100_000)
+            return ValidateOptionsResult.Fail(InfrastructureErrorMessages.Rfb.INVALID_STAGING_BATCH);
+
         if (options.SyncIntervalHours < 1)
             return ValidateOptionsResult.Fail(InfrastructureErrorMessages.Rfb.INVALID_SYNC_INTERVAL);
 

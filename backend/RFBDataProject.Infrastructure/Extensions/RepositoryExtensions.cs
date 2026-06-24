@@ -1,4 +1,7 @@
 using RFBDataProject.Domain.Repositories;
+using RFBDataProject.Infrastructure.Ingestion.Metrics;
+using RFBDataProject.Infrastructure.Ingestion.Persistence;
+using RFBDataProject.Infrastructure.Ingestion.Pipeline;
 using RFBDataProject.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -10,11 +13,14 @@ public static class RepositoryExtensions
     {
         services.AddScoped<IIngestionReleaseRepository, IngestionReleaseRepository>();
         services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();
-        services.AddScoped<ICompanyRepository, CompanyRepository>();
-        services.AddScoped<IEstablishmentRepository, EstablishmentRepository>();
-        services.AddScoped<IPartnerRepository, PartnerRepository>();
+        services.AddScoped<IImportExecutionRepository, ImportExecutionRepository>();
         services.AddScoped<ICnpjBulkRepository, CnpjBulkRepository>();
-        services.AddScoped<ICnpjBulkLoader, Ingestion.CnpjBulkCopyService>();
+        services.AddSingleton<PipelineChannelFactory>();
+        services.AddSingleton<RfbIngestionMetrics>();
+
+        services.AddScoped<IStagingBulkWriter, StagingBulkWriter>();
+        services.AddScoped<INpgsqlBulkConnectionFactory, NpgsqlBulkConnectionFactory>();
+        services.AddScoped<IIngestionPipelineOrchestrator, IngestionPipelineOrchestrator>();
 
         return services;
     }

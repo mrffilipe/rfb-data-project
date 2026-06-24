@@ -5,6 +5,8 @@ using RFBDataProject.Application.Services.UnitOfWork;
 using RFBDataProject.Domain.Entities;
 using RFBDataProject.Domain.Enums;
 using RFBDataProject.Domain.Repositories;
+using RFBDataProject.Infrastructure.Ingestion.Pipeline;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace RFBDataProject.Infrastructure.Services.Ingestion;
@@ -15,34 +17,34 @@ public sealed class IngestionService : IIngestionService
     private static volatile bool IsRunning;
 
     private readonly IRfbDiscoveryService _discovery;
-    private readonly IRfbDownloadService _download;
-    private readonly ICnpjBulkLoader _bulkLoader;
+    private readonly IIngestionPipelineOrchestrator _orchestrator;
     private readonly ICnpjBulkRepository _bulkRepository;
     private readonly IIngestionReleaseRepository _releaseRepository;
     private readonly IIngestionRunRepository _runRepository;
+    private readonly IImportExecutionRepository _importExecutionRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<IngestionService> _logger;
-    private readonly Configurations.RfbOptions _options;
 
     public IngestionService(
         IRfbDiscoveryService discovery,
-        IRfbDownloadService download,
-        ICnpjBulkLoader bulkLoader,
+        IIngestionPipelineOrchestrator orchestrator,
         ICnpjBulkRepository bulkRepository,
         IIngestionReleaseRepository releaseRepository,
         IIngestionRunRepository runRepository,
+        IImportExecutionRepository importExecutionRepository,
         IUnitOfWork unitOfWork,
-        Microsoft.Extensions.Options.IOptions<Configurations.RfbOptions> options,
+        IServiceScopeFactory scopeFactory,
         ILogger<IngestionService> logger)
     {
         _discovery = discovery;
-        _download = download;
-        _bulkLoader = bulkLoader;
+        _orchestrator = orchestrator;
         _bulkRepository = bulkRepository;
         _releaseRepository = releaseRepository;
         _runRepository = runRepository;
+        _importExecutionRepository = importExecutionRepository;
         _unitOfWork = unitOfWork;
-        _options = options.Value;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -52,12 +54,15 @@ public sealed class IngestionService : IIngestionService
         var latest = await _releaseRepository.GetLatestReleaseAsync(ct);
         var latestRun = await _runRepository.GetLatestRunAsync(ct);
         var release = latest ?? active;
+        var referencePeriod = active?.ReferencePeriod ?? latest?.ReferencePeriod;
+        var hasStagingData = referencePeriod is not null
+            && await _bulkRepository.FindLatestStagingExecutionIdAsync(referencePeriod, ct) is not null;
 
         var artifacts = release?.Artifacts.ToList() ?? [];
         return new IngestionStatusDto
         {
             IsSyncRunning = IsRunning,
-            IsDataReady = active is not null,
+            IsDataReady = hasStagingData,
             ActiveReferencePeriod = active?.ReferencePeriod,
             LatestReferencePeriod = latest?.ReferencePeriod,
             ReleaseStatus = release?.Status.ToString(),
@@ -87,7 +92,9 @@ public sealed class IngestionService : IIngestionService
         {
             try
             {
-                await RunSyncAsync(CancellationToken.None);
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var ingestion = scope.ServiceProvider.GetRequiredService<IIngestionService>();
+                await ingestion.RunSyncAsync(CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -105,9 +112,12 @@ public sealed class IngestionService : IIngestionService
 
         IsRunning = true;
         IngestionRun? run = null;
+        ImportExecution? execution = null;
 
         try
         {
+            await CleanupInterruptedRunsAsync(ct);
+
             var discovery = await _discovery.DiscoverLatestAsync(ct);
             if (discovery is null)
             {
@@ -139,35 +149,37 @@ public sealed class IngestionService : IIngestionService
 
             run = IngestionRun.Start(release.Id);
             await _runRepository.AddAsync(run, ct);
+
+            execution = ImportExecution.Start(run.Id, release.ReferencePeriod);
+            await _importExecutionRepository.AddAsync(execution, ct);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            await _bulkRepository.EnsureSchemaAsync(ct);
+            var stagingComplete = release.Artifacts.All(a =>
+                a.Status is IngestionArtifactStatus.Loaded or IngestionArtifactStatus.Skipped);
 
-            var shouldTruncate = active is null || active.ReferencePeriod != discovery.ReferencePeriod;
-            if (shouldTruncate)
-                await _bulkRepository.TruncateAllCnpjTablesAsync(ct);
-
-            var semaphore = new SemaphoreSlim(_options.DownloadParallelism);
-            var tasks = discovery.Artifacts.Select(async remote =>
+            Guid? reuseStagingExecutionId = null;
+            if (stagingComplete)
             {
-                await semaphore.WaitAsync(ct);
-                try
+                reuseStagingExecutionId = await _bulkRepository.FindLatestStagingExecutionIdAsync(
+                    release.ReferencePeriod, ct);
+                if (reuseStagingExecutionId is not null)
                 {
-                    await ProcessArtifactAsync(release, remote, shouldTruncate, ct);
-                    run.RecordArtifactProcessed();
+                    _logger.LogInformation(
+                        "Staging complete for {ReferencePeriod}. Resuming from existing staging without re-download.",
+                        release.ReferencePeriod);
                 }
-                catch (Exception ex)
-                {
-                    run.RecordArtifactFailed();
-                    _logger.LogError(ex, "Failed to process artifact {FileName}", remote.FileName);
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            });
+            }
 
-            await Task.WhenAll(tasks);
+            var forceReload = !stagingComplete || reuseStagingExecutionId is null;
+
+            await _orchestrator.RunAsync(
+                release,
+                run,
+                execution,
+                discovery.Artifacts,
+                forceReload,
+                reuseStagingExecutionId,
+                ct);
 
             var reloaded = await _releaseRepository.GetByIdAsync(release.Id, ct)
                 ?? throw new InvalidOperationException("Release not found after sync.");
@@ -181,6 +193,8 @@ public sealed class IngestionService : IIngestionService
                 _releaseRepository.Update(reloaded);
                 run.Fail("One or more artifacts failed to load.");
                 _runRepository.Update(run);
+                execution.Fail("One or more artifacts failed to load.");
+                _importExecutionRepository.Update(execution);
                 await _unitOfWork.SaveChangesAsync(ct);
                 return;
             }
@@ -191,17 +205,19 @@ public sealed class IngestionService : IIngestionService
                 _releaseRepository.Update(active);
             }
 
-            await _bulkRepository.CreateIndexesAsync(ct);
-            await _bulkRepository.CreateSearchIndexesAsync(ct);
-            await _bulkRepository.CreateViewsAsync(ct);
-
             reloaded.MarkActive();
             _releaseRepository.Update(reloaded);
             run.Complete();
             _runRepository.Update(run);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Ingestion completed for reference period {ReferencePeriod}.", discovery.ReferencePeriod);
+            _logger.LogInformation(
+                "Ingestion completed for {ReferencePeriod}. Processed={Processed}, Inserted={Inserted}, Updated={Updated}, Ignored={Ignored}",
+                discovery.ReferencePeriod,
+                execution.ProcessedCount,
+                execution.InsertedCount,
+                execution.UpdatedCount,
+                execution.IgnoredCount);
         }
         catch (Exception ex)
         {
@@ -210,9 +226,15 @@ public sealed class IngestionService : IIngestionService
             {
                 run.Fail(ex.Message);
                 _runRepository.Update(run);
-                await _unitOfWork.SaveChangesAsync(ct);
             }
 
+            if (execution is not null)
+            {
+                execution.Fail(ex.Message);
+                _importExecutionRepository.Update(execution);
+            }
+
+            await _unitOfWork.SaveChangesAsync(ct);
             throw;
         }
         finally
@@ -222,33 +244,27 @@ public sealed class IngestionService : IIngestionService
         }
     }
 
-    private async Task ProcessArtifactAsync(
-        IngestionRelease release,
-        RfbRemoteArtifact remote,
-        bool forceReload,
-        CancellationToken ct)
+    private async Task CleanupInterruptedRunsAsync(CancellationToken ct)
     {
-        var artifact = release.Artifacts.First(a => a.FileName == remote.FileName);
-        var remoteSize = await _download.GetRemoteSizeAsync(remote.DownloadUrl, ct);
-
-        if (!forceReload && artifact.IsAlreadyLoaded(remoteSize))
-        {
-            artifact.MarkSkipped();
-            _releaseRepository.Update(release);
-            await _unitOfWork.SaveChangesAsync(ct);
+        var threshold = DateTime.UtcNow.AddHours(-2);
+        var staleRuns = await _runRepository.GetStaleRunningAsync(threshold, ct);
+        if (staleRuns.Count == 0)
             return;
+
+        foreach (var staleRun in staleRuns)
+        {
+            staleRun.Fail("Interrupted by restart");
+            _runRepository.Update(staleRun);
+
+            var staleExecution = await _importExecutionRepository.GetByRunIdAsync(staleRun.Id, ct);
+            if (staleExecution is { Status: ImportExecutionStatus.Running })
+            {
+                staleExecution.Fail("Interrupted by restart");
+                _importExecutionRepository.Update(staleExecution);
+            }
         }
 
-        artifact.MarkDownloading();
-        _releaseRepository.Update(release);
         await _unitOfWork.SaveChangesAsync(ct);
-
-        await using var zipStream = await _download.DownloadToTempFileStreamAsync(remote.DownloadUrl, ct);
-        await using var csvStream = await Rfb.RfbZipCsvStreamReader.OpenSingleCsvEntryAsync(zipStream, ct);
-        await _bulkLoader.LoadCsvStreamAsync(remote.TargetTable, csvStream, ct);
-
-        artifact.MarkLoaded(remoteSize);
-        _releaseRepository.Update(release);
-        await _unitOfWork.SaveChangesAsync(ct);
+        _logger.LogInformation("Marked {Count} interrupted ingestion run(s) as failed.", staleRuns.Count);
     }
 }

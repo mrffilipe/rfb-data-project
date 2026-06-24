@@ -1,29 +1,34 @@
-using System.IO.Compression;
+using SharpCompress.Readers;
 
 namespace RFBDataProject.Infrastructure.Rfb;
 
-public sealed class RfbZipCsvStreamReader
+public static class RfbZipEntryStream
 {
-    public static async Task<Stream> OpenSingleCsvEntryAsync(Stream zipStream, CancellationToken ct = default)
+    public static Stream OpenFirstCsvEntry(Stream zipStream)
     {
-        var archive = new ZipArchive(zipStream, ZipArchiveMode.Read, leaveOpen: true);
-        var entry = archive.Entries.FirstOrDefault(e => !e.FullName.EndsWith('/'))
-            ?? throw new InvalidOperationException("ZIP archive contains no CSV entry.");
+        var reader = ReaderFactory.Open(zipStream, new ReaderOptions { LeaveStreamOpen = false });
+        while (reader.MoveToNextEntry())
+        {
+            if (reader.Entry.IsDirectory)
+                continue;
 
-        var entryStream = await entry.OpenAsync(ct);
-        return new EntryStreamWrapper(entryStream, archive);
+            var entryStream = reader.OpenEntryStream();
+            return new EntryStreamWrapper(entryStream, reader);
+        }
+
+        throw new InvalidOperationException("ZIP archive contains no CSV entry.");
     }
 
     private sealed class EntryStreamWrapper : Stream
     {
         private readonly Stream _entry;
-        private readonly ZipArchive _archive;
+        private readonly IReader _reader;
         private bool _disposed;
 
-        public EntryStreamWrapper(Stream entry, ZipArchive archive)
+        public EntryStreamWrapper(Stream entry, IReader reader)
         {
             _entry = entry;
-            _archive = archive;
+            _reader = reader;
         }
 
         public override bool CanRead => _entry.CanRead;
@@ -45,7 +50,7 @@ public sealed class RfbZipCsvStreamReader
             if (disposing)
             {
                 _entry.Dispose();
-                _archive.Dispose();
+                _reader.Dispose();
             }
 
             _disposed = true;

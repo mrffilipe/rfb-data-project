@@ -1,37 +1,69 @@
+using System.Runtime.CompilerServices;
 using System.Text;
-using RFBDataProject.Domain.Repositories;
-using RFBDataProject.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
-namespace RFBDataProject.Infrastructure.Ingestion;
+namespace RFBDataProject.Infrastructure.Ingestion.Parsing;
 
-public sealed class CnpjBulkCopyService : ICnpjBulkLoader
+public static class RfbCsvParser
 {
     private static readonly Encoding Latin1 = Encoding.GetEncoding("ISO-8859-1");
-    private readonly ApplicationDbContext _context;
 
-    public CnpjBulkCopyService(ApplicationDbContext context) => _context = context;
-
-    public async Task LoadCsvStreamAsync(string targetTable, Stream csvStream, CancellationToken ct = default)
+    public static async IAsyncEnumerable<string[]> ParseAsync(
+        Stream stream,
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var columns = RfbTableColumns.GetColumns(targetTable);
-        var columnList = string.Join(", ", columns.Select(c => $"\"{c}\""));
-
-        await using var conn = new NpgsqlConnection(_context.Database.GetConnectionString());
-        await conn.OpenAsync(ct);
-
-        await using var writer = await conn.BeginTextImportAsync(
-            $"COPY \"{targetTable}\" ({columnList}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', QUOTE '\"', NULL '')",
-            ct);
-
-        await using var sanitized = new Latin1SanitizingStream(csvStream);
+        await using var sanitized = new Latin1SanitizingStream(stream);
         using var reader = new StreamReader(sanitized, Latin1, detectEncodingFromByteOrderMarks: false);
 
-        var buffer = new char[81920];
-        int read;
-        while ((read = await reader.ReadAsync(buffer, ct)) > 0)
-            await writer.WriteAsync(buffer.AsMemory(0, read), ct);
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var line = await reader.ReadLineAsync(ct);
+            if (line is null)
+                yield break;
+
+            if (line.Length == 0)
+                continue;
+
+            yield return ParseLine(line);
+        }
+    }
+
+    internal static string[] ParseLine(string line)
+    {
+        var fields = new List<string>();
+        var current = new StringBuilder();
+        var inQuotes = false;
+
+        for (var i = 0; i < line.Length; i++)
+        {
+            var c = line[i];
+            if (c == '"')
+            {
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    current.Append('"');
+                    i++;
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
+
+                continue;
+            }
+
+            if (c == ';' && !inQuotes)
+            {
+                fields.Add(current.ToString());
+                current.Clear();
+                continue;
+            }
+
+            current.Append(c);
+        }
+
+        fields.Add(current.ToString());
+        return fields.ToArray();
     }
 
     private sealed class Latin1SanitizingStream : Stream

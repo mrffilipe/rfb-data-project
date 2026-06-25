@@ -1,6 +1,19 @@
 import { isAxiosError } from 'axios'
 import type { ProblemDetails } from '../types'
 
+export function isApiTimeoutError(error: unknown): boolean {
+  if (!isAxiosError(error)) {
+    return false
+  }
+
+  if (error.code === 'ECONNABORTED') {
+    return true
+  }
+
+  const message = error.message.toLowerCase()
+  return message.includes('timeout')
+}
+
 export function getApiErrorMessage(error: unknown): string {
   if (isAxiosError<ProblemDetails>(error)) {
     const data = error.response?.data

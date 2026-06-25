@@ -1,7 +1,10 @@
-import { api } from '../config'
+import { api, env } from '../config'
 import type {
   CompanyDetail,
+  CompanyExportResult,
   CompanySummary,
+  ExportListCompaniesParams,
+  ExportSearchCompaniesParams,
   ListCompaniesParams,
   ListHoldingsParams,
   PagedResult,
@@ -74,6 +77,89 @@ function buildCompanyFilterParams(
   }
 
   return base
+}
+
+function resolveExportTimeout(limit: number): number {
+  return Math.min(600_000, Math.max(env.apiTimeoutMs, 60_000 + limit * 30))
+}
+
+function buildExportParams(
+  params: ExportSearchCompaniesParams | ExportListCompaniesParams,
+): Record<string, unknown> {
+  const { limit = 100, deduplicateEmail, page: _page, pageSize: _pageSize, ...filters } = params
+  return {
+    ...buildCompanyFilterParams({ ...filters, page: 1, pageSize: 20 }),
+    limit,
+    deduplicateEmail: deduplicateEmail || undefined,
+  }
+}
+
+function normalizeExportRow(raw: unknown): Record<string, string | null> {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {}
+  }
+
+  const record = raw as Record<string, unknown>
+  const normalized: Record<string, string | null> = {}
+  for (const [key, value] of Object.entries(record)) {
+    normalized[key] = value === null || value === undefined ? null : String(value)
+  }
+  return normalized
+}
+
+function normalizeExportStats(raw: unknown): CompanyExportResult['stats'] {
+  const r = raw as Record<string, unknown>
+  return {
+    requestedLimit: Number(r.requestedLimit ?? r.RequestedLimit ?? 0),
+    exportedCount: Number(r.exportedCount ?? r.ExportedCount ?? 0),
+    scannedCount: Number(r.scannedCount ?? r.ScannedCount ?? 0),
+    withEmailCount: Number(r.withEmailCount ?? r.WithEmailCount ?? 0),
+    withoutEmailCount: Number(r.withoutEmailCount ?? r.WithoutEmailCount ?? 0),
+    uniqueEmailCount: Number(r.uniqueEmailCount ?? r.UniqueEmailCount ?? 0),
+    duplicateEmailSkippedCount: Number(
+      r.duplicateEmailSkippedCount ?? r.DuplicateEmailSkippedCount ?? 0,
+    ),
+  }
+}
+
+function normalizeCompanyExportResult(raw: unknown): CompanyExportResult {
+  const r = raw as Record<string, unknown>
+  const columnsRaw = r.columns ?? r.Columns
+  const itemsRaw = r.items ?? r.Items
+  const statsRaw = r.stats ?? r.Stats
+
+  const columns = Array.isArray(columnsRaw) ? columnsRaw.map(String) : []
+  const items = Array.isArray(itemsRaw) ? itemsRaw.map(normalizeExportRow) : []
+
+  return {
+    columns,
+    stats: normalizeExportStats(statsRaw),
+    items,
+  }
+}
+
+export async function exportCompaniesSearch(
+  params: ExportSearchCompaniesParams = {},
+): Promise<CompanyExportResult> {
+  const limit = params.limit ?? 100
+  const { data } = await api.get(`${apiPaths.companies}/search/export`, {
+    params: buildExportParams(params),
+    paramsSerializer: { serialize: serializeQueryParams },
+    timeout: resolveExportTimeout(limit),
+  })
+  return normalizeCompanyExportResult(data)
+}
+
+export async function exportCompaniesList(
+  params: ExportListCompaniesParams = {},
+): Promise<CompanyExportResult> {
+  const limit = params.limit ?? 100
+  const { data } = await api.get(`${apiPaths.companies}/export`, {
+    params: buildExportParams(params),
+    paramsSerializer: { serialize: serializeQueryParams },
+    timeout: resolveExportTimeout(limit),
+  })
+  return normalizeCompanyExportResult(data)
 }
 
 export async function searchCompanies(params: SearchCompaniesParams = {}): Promise<PagedResult<CompanySummary>> {

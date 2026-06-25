@@ -1,4 +1,4 @@
-export { getCompanyByCnpj, listCompanies, listHoldings, searchCompanies } from './companiesService'
+export { getCompanyByCnpj, exportCompaniesList, exportCompaniesSearch, listCompanies, listHoldings, searchCompanies } from './companiesService'
 export { checkHealth } from './healthService'
 export { getIngestionStatus, triggerIngestionSync } from './ingestionService'
 export {

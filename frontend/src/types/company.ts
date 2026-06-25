@@ -72,3 +72,27 @@ export interface ListHoldingsParams {
   page?: number
   pageSize?: number
 }
+
+export interface CompanyExportStats {
+  requestedLimit: number
+  exportedCount: number
+  scannedCount: number
+  withEmailCount: number
+  withoutEmailCount: number
+  uniqueEmailCount: number
+  duplicateEmailSkippedCount: number
+}
+
+export interface CompanyExportResult {
+  columns: string[]
+  stats: CompanyExportStats
+  items: Record<string, string | null>[]
+}
+
+export interface ExportCompaniesOptions {
+  limit?: number
+  deduplicateEmail?: boolean
+}
+
+export type ExportSearchCompaniesParams = SearchCompaniesParams & ExportCompaniesOptions
+export type ExportListCompaniesParams = ListCompaniesParams & ExportCompaniesOptions

@@ -38,6 +38,122 @@ public sealed class CompanySearchService : ICompanySearchService
         return QueryAsync(request, ct);
     }
 
+    public async Task<CompanyExportResultDto> ExportAsync(ExportCompaniesRequest request, CancellationToken ct = default)
+    {
+        ValidateQuery(request);
+        ValidateExportLimit(request);
+
+        const int batchSize = 500;
+        var executionId = await _executionResolver.GetActiveExecutionIdAsync(ct);
+
+        var exported = new List<IReadOnlyDictionary<string, string?>>();
+        var seenEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var scannedWithEmail = 0;
+        var scannedWithoutEmail = 0;
+        var duplicateSkipped = 0;
+        var scanned = 0;
+
+        await using var conn = new NpgsqlConnection(_context.Database.GetConnectionString());
+        await conn.OpenAsync(ct);
+
+        var page = 1;
+        while (exported.Count < request.Limit)
+        {
+            var batchRequest = new SearchCompaniesRequest
+            {
+                Query = request.Query,
+                ExcludeQuery = request.ExcludeQuery,
+                StateCodes = request.StateCodes,
+                ExcludeStates = request.ExcludeStates,
+                Cnaes = request.Cnaes,
+                ExcludeCnaes = request.ExcludeCnaes,
+                LegalNatureCodes = request.LegalNatureCodes,
+                ExcludeLegalNatureCodes = request.ExcludeLegalNatureCodes,
+                CompanySizeCodes = request.CompanySizeCodes,
+                ExcludeCompanySizes = request.ExcludeCompanySizes,
+                RegistrationStatuses = request.RegistrationStatuses,
+                ExcludeRegistrationStatuses = request.ExcludeRegistrationStatuses,
+                HeadOfficeOnly = request.HeadOfficeOnly,
+                ExcludeHeadOfficeOnly = request.ExcludeHeadOfficeOnly,
+                ShareCapitalMin = request.ShareCapitalMin,
+                ShareCapitalMax = request.ShareCapitalMax,
+                ExcludeShareCapitalRange = request.ExcludeShareCapitalRange,
+                Page = page,
+                PageSize = batchSize
+            };
+
+            var query = CompanySearchQueryBuilder.BuildExport(batchRequest, executionId);
+
+            var parameters = query.Parameters.ToList();
+            parameters.Add(new NpgsqlParameter("limit", batchSize));
+            parameters.Add(new NpgsqlParameter("offset", (page - 1) * batchSize));
+
+            var batch = await ExecuteExportQueryAsync(conn, query.SelectSql, parameters, ct);
+            if (batch.Count == 0)
+                break;
+
+            foreach (var row in batch)
+            {
+                scanned++;
+                var email = row.GetValueOrDefault("correio_eletronico");
+
+                if (string.IsNullOrWhiteSpace(email))
+                {
+                    scannedWithoutEmail++;
+                    continue;
+                }
+
+                scannedWithEmail++;
+                var normalized = email.Trim().ToLowerInvariant();
+
+                if (request.DeduplicateEmail && seenEmails.Contains(normalized))
+                {
+                    duplicateSkipped++;
+                    continue;
+                }
+
+                if (request.DeduplicateEmail)
+                    seenEmails.Add(normalized);
+
+                exported.Add(row);
+
+                if (exported.Count >= request.Limit)
+                    break;
+            }
+
+            if (batch.Count < batchSize)
+                break;
+
+            page++;
+        }
+
+        if (exported.Count > request.Limit)
+            exported = exported.Take(request.Limit).ToList();
+
+        var uniqueInExport = exported
+            .Select(r => r.GetValueOrDefault("correio_eletronico"))
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Select(e => e!.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
+        return new CompanyExportResultDto
+        {
+            Columns = CompanyExportColumns.All,
+            Stats = new CompanyExportStatsDto
+            {
+                RequestedLimit = request.Limit,
+                ExportedCount = exported.Count,
+                ScannedCount = scanned,
+                WithEmailCount = scannedWithEmail,
+                WithoutEmailCount = scannedWithoutEmail,
+                UniqueEmailCount = uniqueInExport,
+                DuplicateEmailSkippedCount = duplicateSkipped
+            },
+            Items = exported
+        };
+    }
+
     private async Task<PagedResult<CompanySummaryDto>> QueryAsync(
         CompanyFilterRequest request,
         CancellationToken ct)
@@ -119,6 +235,39 @@ public sealed class CompanySearchService : ICompanySearchService
         }
 
         return items;
+    }
+
+    private static async Task<List<IReadOnlyDictionary<string, string?>>> ExecuteExportQueryAsync(
+        NpgsqlConnection conn,
+        string sql,
+        List<NpgsqlParameter> parameters,
+        CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand(sql, conn) { CommandTimeout = 300 };
+        NpgsqlCommandBinder.AddParameters(cmd, parameters);
+
+        var items = new List<IReadOnlyDictionary<string, string?>>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var fieldCount = reader.FieldCount;
+
+        while (await reader.ReadAsync(ct))
+        {
+            var row = new Dictionary<string, string?>(fieldCount, StringComparer.Ordinal);
+            for (var i = 0; i < fieldCount; i++)
+            {
+                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetString(i);
+            }
+
+            items.Add(row);
+        }
+
+        return items;
+    }
+
+    private static void ValidateExportLimit(ExportCompaniesRequest request)
+    {
+        if (request.Limit is < 1 or > 10_000)
+            throw new ApplicationValidationException(ApplicationErrorMessages.Search.INVALID_EXPORT_LIMIT);
     }
 
     private static void ValidatePaged(PagedRequest request)

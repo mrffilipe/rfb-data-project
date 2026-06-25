@@ -53,6 +53,238 @@ public static class CompanySearchQueryBuilder
         return BuildEstabFirstQuery(request, executionId, fetchSize, offset);
     }
 
+    public static CompanySearchQuery BuildExport(CompanyFilterRequest request, Guid executionId)
+    {
+        var batchSize = request.PageSize;
+        var offset = (request.Page - 1) * request.PageSize;
+
+        if (!string.IsNullOrWhiteSpace(request.Query))
+        {
+            return request.ExcludeQuery
+                ? BuildExportExcludeTextQuery(request, executionId, batchSize, offset)
+                : BuildExportTextSearchQuery(request, executionId, batchSize, offset);
+        }
+
+        return BuildExportEstabFirstQuery(request, executionId, batchSize, offset);
+    }
+
+    private const string ExportLookupJoins = """
+        LEFT JOIN receita_natureza_staging ln
+            ON ln.codigo = base.natureza_juridica AND ln.execution_id = base.execution_id
+        LEFT JOIN receita_municipio_staging m
+            ON m.codigo = base.municipio AND m.execution_id = base.execution_id
+        LEFT JOIN receita_cnae_staging cn
+            ON cn.codigo = base.cnae_fiscal_principal AND cn.execution_id = base.execution_id
+        """;
+
+    private const string ExportSelectColumns = """
+        SELECT base.cnpj_basico || base.cnpj_ordem || base.cnpj_dv AS cnpj,
+               base.razao_social AS razao_social,
+               base.nome_fantasia AS nome_fantasia,
+               base.natureza_juridica AS natureza_juridica,
+               ln.descricao AS natureza_juridica_desc,
+               base.capital_social AS capital_social,
+               base.porte_empresa AS porte_empresa,
+               base.situacao_cadastral AS situacao_cadastral,
+               base.data_inicio_atividade AS data_inicio_atividade,
+               base.cnae_fiscal_principal AS cnae_fiscal_principal,
+               cn.descricao AS cnae_principal_desc,
+               base.identificador_matriz_filial AS identificador_matriz_filial,
+               base.uf AS uf,
+               base.municipio AS municipio,
+               m.descricao AS municipio_desc,
+               base.logradouro AS logradouro,
+               base.numero AS numero,
+               base.bairro AS bairro,
+               base.cep AS cep,
+               base.correio_eletronico AS correio_eletronico,
+               CASE WHEN base.telefone_1 IS NOT NULL AND base.telefone_1 <> ''
+                    THEN COALESCE(base.ddd_1, '') || base.telefone_1 ELSE NULL END AS telefone_1
+        """;
+
+    private const string ExportEstabInnerColumns = """
+        e.cnpj_basico,
+        e.cnpj_ordem,
+        e.cnpj_dv,
+        e.nome_fantasia,
+        e.situacao_cadastral,
+        e.data_inicio_atividade,
+        e.cnae_fiscal_principal,
+        e.identificador_matriz_filial,
+        e.uf,
+        e.municipio,
+        e.logradouro,
+        e.numero,
+        e.bairro,
+        e.cep,
+        e.correio_eletronico,
+        e.ddd_1,
+        e.telefone_1,
+        e.execution_id,
+        c.razao_social,
+        c.natureza_juridica,
+        c.capital_social,
+        c.porte_empresa
+        """;
+
+    private static CompanySearchQuery BuildExportEstabFirstQuery(
+        CompanyFilterRequest request,
+        Guid executionId,
+        int batchSize,
+        int offset)
+    {
+        var estabFilters = new List<string> { "e.execution_id = @execution_id" };
+        var parameters = new List<NpgsqlParameter> { new("execution_id", executionId) };
+
+        AppendEstabFilters(estabFilters, parameters, request);
+        AppendExportEmailOnlyFilter(estabFilters);
+        AppendEmpresaSemiJoinFilter(estabFilters, parameters, request);
+
+        var where = string.Join(" AND ", estabFilters);
+        var selectSql = $"""
+            WITH page_estab AS (
+                SELECT {ExportEstabInnerColumns}
+                FROM receita_estabelecimento_staging e
+                INNER JOIN receita_empresa_staging c
+                    ON c.cnpj_basico = e.cnpj_basico AND c.execution_id = e.execution_id
+                WHERE {where}
+                ORDER BY e.cnpj_basico, e.cnpj_ordem
+                LIMIT @limit OFFSET @offset
+            )
+            {ExportSelectColumns}
+            FROM page_estab base
+            {ExportLookupJoins}
+            ORDER BY base.cnpj_basico, base.cnpj_ordem
+            """;
+
+        return new CompanySearchQuery
+        {
+            SelectSql = selectSql,
+            Parameters = parameters,
+            FetchSize = batchSize
+        };
+    }
+
+    private static CompanySearchQuery BuildExportExcludeTextQuery(
+        CompanyFilterRequest request,
+        Guid executionId,
+        int batchSize,
+        int offset)
+    {
+        var parameters = new List<NpgsqlParameter>
+        {
+            new("execution_id", executionId),
+            new("q", $"%{request.Query!.Trim()}%")
+        };
+
+        var estabFilters = new List<string>
+        {
+            "e.execution_id = @execution_id",
+            "NOT (c.razao_social ILIKE @q OR COALESCE(e.nome_fantasia, '') ILIKE @q)"
+        };
+
+        AppendEstabFilters(estabFilters, parameters, request, skipTextJoin: true);
+        AppendExportEmailOnlyFilter(estabFilters);
+        AppendEmpresaSemiJoinFilter(estabFilters, parameters, request, skipLegalNatureAndCapital: true);
+
+        if (HasValues(request.LegalNatureCodes))
+        {
+            AppendStringArrayFilterToList(
+                estabFilters, parameters, request.LegalNatureCodes, request.ExcludeLegalNatureCodes,
+                "c.natureza_juridica", "natureza", v => v.Trim());
+        }
+
+        AppendShareCapitalFilter(estabFilters, parameters, request, "c");
+
+        var where = string.Join(" AND ", estabFilters);
+        var selectSql = $"""
+            WITH page_estab AS (
+                SELECT {ExportEstabInnerColumns}
+                FROM receita_estabelecimento_staging e
+                INNER JOIN receita_empresa_staging c
+                    ON c.cnpj_basico = e.cnpj_basico AND c.execution_id = e.execution_id
+                WHERE {where}
+                ORDER BY e.cnpj_basico, e.cnpj_ordem
+                LIMIT @limit OFFSET @offset
+            )
+            {ExportSelectColumns}
+            FROM page_estab base
+            {ExportLookupJoins}
+            ORDER BY base.cnpj_basico, base.cnpj_ordem
+            """;
+
+        return new CompanySearchQuery
+        {
+            SelectSql = selectSql,
+            Parameters = parameters,
+            FetchSize = batchSize
+        };
+    }
+
+    private static CompanySearchQuery BuildExportTextSearchQuery(
+        CompanyFilterRequest request,
+        Guid executionId,
+        int batchSize,
+        int offset)
+    {
+        var parameters = new List<NpgsqlParameter>
+        {
+            new("execution_id", executionId),
+            new("q", $"%{request.Query!.Trim()}%")
+        };
+
+        var estabFilters = new List<string> { "e.execution_id = @execution_id" };
+        AppendEstabFilters(estabFilters, parameters, request);
+        AppendExportEmailOnlyFilter(estabFilters);
+        AppendEmpresaSemiJoinFilter(estabFilters, parameters, request);
+
+        var estabWhere = string.Join(" AND ", estabFilters);
+        var exportInner = $"""
+            SELECT {ExportEstabInnerColumns}
+            FROM receita_estabelecimento_staging e
+            INNER JOIN receita_empresa_staging c
+                ON c.cnpj_basico = e.cnpj_basico AND c.execution_id = e.execution_id
+            """;
+
+        var selectSql = $"""
+            WITH empresa_match AS (
+                SELECT cnpj_basico, razao_social
+                FROM receita_empresa_staging
+                WHERE execution_id = @execution_id AND razao_social ILIKE @q
+            ),
+            from_razao AS (
+                {exportInner}
+                INNER JOIN empresa_match em ON em.cnpj_basico = e.cnpj_basico
+                WHERE {estabWhere}
+            ),
+            from_fantasia AS (
+                {exportInner}
+                WHERE {estabWhere} AND e.nome_fantasia ILIKE @q
+            ),
+            combined AS (
+                SELECT * FROM from_razao
+                UNION
+                SELECT * FROM from_fantasia
+            ),
+            page AS (
+                SELECT * FROM combined
+                ORDER BY cnpj_basico, cnpj_ordem
+                LIMIT @limit OFFSET @offset
+            )
+            {ExportSelectColumns}
+            FROM page base
+            {ExportLookupJoins}
+            ORDER BY base.cnpj_basico, base.cnpj_ordem
+            """;
+
+        return new CompanySearchQuery
+        {
+            SelectSql = selectSql,
+            Parameters = parameters,
+            FetchSize = batchSize
+        };
+    }
+
     private static CompanySearchQuery BuildEstabFirstQuery(
         CompanyFilterRequest request,
         Guid executionId,
@@ -286,6 +518,11 @@ public static class CompanySearchQueryBuilder
             Parameters = parameters,
             FetchSize = fetchSize
         };
+    }
+
+    private static void AppendExportEmailOnlyFilter(List<string> filters)
+    {
+        filters.Add("e.correio_eletronico IS NOT NULL AND BTRIM(e.correio_eletronico) <> ''");
     }
 
     private static void AppendEstabFilters(

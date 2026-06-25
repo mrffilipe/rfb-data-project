@@ -1,5 +1,6 @@
 export { BackButton } from './BackButton'
 export { CheckboxField } from './CheckboxField'
+export { CompanyExportPanel } from './CompanyExportPanel'
 export { ConfirmDialog } from './ConfirmDialog'
 export { DataTable } from './DataTable'
 export { EmptyState } from './EmptyState'

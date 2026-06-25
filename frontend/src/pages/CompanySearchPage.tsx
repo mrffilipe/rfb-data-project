@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import {
   CheckboxField,
+  CompanyExportPanel,
   DataTable,
   FeedbackAlerts,
   FilterField,
@@ -22,9 +23,10 @@ import {
   listLegalNatures,
   listRegistrationStatuses,
   listStates,
+  exportCompaniesSearch,
   searchCompanies,
 } from '../services'
-import type { CompanySummary } from '../types'
+import type { CompanySummary, ExportSearchCompaniesParams } from '../types'
 import {
   emptyBooleanFilter,
   emptyLookupFilter,
@@ -83,29 +85,45 @@ export function CompanySearchPage() {
     })
   }, [])
 
+  const buildExportParams = useCallback(
+    (): Omit<ExportSearchCompaniesParams, 'limit' | 'deduplicateEmail' | 'page' | 'pageSize'> => ({
+      query: textFilter.value.trim() || undefined,
+      excludeQuery: textFilter.exclude && Boolean(textFilter.value.trim()),
+      stateCodes: lookupCodes(stateFilter),
+      excludeStates: stateFilter.exclude,
+      cnaes: lookupCodes(cnaeFilter),
+      excludeCnaes: cnaeFilter.exclude,
+      legalNatureCodes: lookupCodes(legalNatureFilter),
+      excludeLegalNatureCodes: legalNatureFilter.exclude,
+      companySizeCodes: lookupCodes(companySizeFilter),
+      excludeCompanySizes: companySizeFilter.exclude,
+      registrationStatuses: lookupCodes(registrationStatusFilter),
+      excludeRegistrationStatuses: registrationStatusFilter.exclude,
+      headOfficeOnly: headOfficeFilter.value || undefined,
+      excludeHeadOfficeOnly: headOfficeFilter.exclude && headOfficeFilter.value,
+      shareCapitalMin: capitalFilter.min ? Number(capitalFilter.min) : undefined,
+      shareCapitalMax: capitalFilter.max ? Number(capitalFilter.max) : undefined,
+      excludeShareCapitalRange:
+        capitalFilter.exclude && Boolean(capitalFilter.min || capitalFilter.max),
+    }),
+    [
+      textFilter,
+      stateFilter,
+      cnaeFilter,
+      legalNatureFilter,
+      companySizeFilter,
+      registrationStatusFilter,
+      headOfficeFilter,
+      capitalFilter,
+    ],
+  )
+
   async function runSearch(targetPage: number): Promise<void> {
     setLoading(true)
     setError(null)
     try {
       const result = await searchCompanies({
-        query: textFilter.value.trim() || undefined,
-        excludeQuery: textFilter.exclude && Boolean(textFilter.value.trim()),
-        stateCodes: lookupCodes(stateFilter),
-        excludeStates: stateFilter.exclude,
-        cnaes: lookupCodes(cnaeFilter),
-        excludeCnaes: cnaeFilter.exclude,
-        legalNatureCodes: lookupCodes(legalNatureFilter),
-        excludeLegalNatureCodes: legalNatureFilter.exclude,
-        companySizeCodes: lookupCodes(companySizeFilter),
-        excludeCompanySizes: companySizeFilter.exclude,
-        registrationStatuses: lookupCodes(registrationStatusFilter),
-        excludeRegistrationStatuses: registrationStatusFilter.exclude,
-        headOfficeOnly: headOfficeFilter.value || undefined,
-        excludeHeadOfficeOnly: headOfficeFilter.exclude && headOfficeFilter.value,
-        shareCapitalMin: capitalFilter.min ? Number(capitalFilter.min) : undefined,
-        shareCapitalMax: capitalFilter.max ? Number(capitalFilter.max) : undefined,
-        excludeShareCapitalRange:
-          capitalFilter.exclude && Boolean(capitalFilter.min || capitalFilter.max),
+        ...buildExportParams(),
         page: targetPage,
         pageSize: PAGE_SIZE,
       })
@@ -343,6 +361,11 @@ export function CompanySearchPage() {
 
       {searched ? (
         <SectionCard title="Resultados">
+          <CompanyExportPanel
+            buildExportParams={buildExportParams}
+            exportFn={exportCompaniesSearch}
+            disabled={loading}
+          />
           <DataTable
             columns={companyColumns}
             loading={loading}

@@ -8,6 +8,7 @@ public static class ApplicationErrorMessages
         public const string QUERY_TOO_LONG = "Search query max length is 200.";
         public const string INVALID_PAGE = "Page must be greater than zero.";
         public const string INVALID_PAGE_SIZE = "Page size must be between 1 and 100.";
+        public const string INVALID_EXPORT_LIMIT = "Export limit must be between 1 and 10000.";
     }
 
     public static class Ingestion

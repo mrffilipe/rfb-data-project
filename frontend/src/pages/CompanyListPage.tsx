@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import {
   CheckboxField,
+  CompanyExportPanel,
   DataTable,
   FeedbackAlerts,
   FilterField,
@@ -21,9 +22,10 @@ import {
   listLegalNatures,
   listRegistrationStatuses,
   listStates,
+  exportCompaniesList,
   listCompanies,
 } from '../services'
-import type { CompanySummary } from '../types'
+import type { CompanySummary, ExportListCompaniesParams } from '../types'
 import { emptyBooleanFilter, emptyLookupFilter, lookupCodes } from '../types'
 import { getApiErrorMessage } from '../utils/apiError'
 import { formatCnpj, resolveLookupDescription, toLookupLabelMap } from '../utils/formatters'
@@ -64,19 +66,26 @@ export function CompanyListPage() {
     })
   }, [])
 
+  const buildExportParams = useCallback(
+    (): Omit<ExportListCompaniesParams, 'limit' | 'deduplicateEmail' | 'page' | 'pageSize'> => ({
+      stateCodes: lookupCodes(stateFilter),
+      excludeStates: stateFilter.exclude,
+      cnaes: lookupCodes(cnaeFilter),
+      excludeCnaes: cnaeFilter.exclude,
+      legalNatureCodes: lookupCodes(legalNatureFilter),
+      excludeLegalNatureCodes: legalNatureFilter.exclude,
+      headOfficeOnly: headOfficeFilter.value || undefined,
+      excludeHeadOfficeOnly: headOfficeFilter.exclude && headOfficeFilter.value,
+    }),
+    [stateFilter, cnaeFilter, legalNatureFilter, headOfficeFilter],
+  )
+
   async function runSearch(targetPage: number): Promise<void> {
     setLoading(true)
     setError(null)
     try {
       const result = await listCompanies({
-        stateCodes: lookupCodes(stateFilter),
-        excludeStates: stateFilter.exclude,
-        cnaes: lookupCodes(cnaeFilter),
-        excludeCnaes: cnaeFilter.exclude,
-        legalNatureCodes: lookupCodes(legalNatureFilter),
-        excludeLegalNatureCodes: legalNatureFilter.exclude,
-        headOfficeOnly: headOfficeFilter.value || undefined,
-        excludeHeadOfficeOnly: headOfficeFilter.exclude && headOfficeFilter.value,
+        ...buildExportParams(),
         page: targetPage,
         pageSize: PAGE_SIZE,
       })
@@ -212,6 +221,11 @@ export function CompanyListPage() {
 
       {searched ? (
         <SectionCard title="Resultados">
+          <CompanyExportPanel
+            buildExportParams={buildExportParams}
+            exportFn={exportCompaniesList}
+            disabled={loading}
+          />
           <DataTable
             columns={companyColumns}
             loading={loading}

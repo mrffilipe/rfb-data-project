@@ -30,6 +30,20 @@ public sealed class CompaniesController : V1ApiControllerBase
         return await _searchService.ListAsync(request, ct);
     }
 
+    [HttpGet("search/export")]
+    [ProducesResponseType(typeof(CompanyExportResultDto), StatusCodes.Status200OK)]
+    public async Task<CompanyExportResultDto> ExportSearch([FromQuery] ExportCompaniesRequest request, CancellationToken ct)
+    {
+        return await _searchService.ExportAsync(request, ct);
+    }
+
+    [HttpGet("export")]
+    [ProducesResponseType(typeof(CompanyExportResultDto), StatusCodes.Status200OK)]
+    public async Task<CompanyExportResultDto> ExportList([FromQuery] ExportCompaniesRequest request, CancellationToken ct)
+    {
+        return await _searchService.ExportAsync(request, ct);
+    }
+
     [HttpGet("holdings")]
     [ProducesResponseType(typeof(PagedResult<CompanySummaryDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<CompanySummaryDto>> Holdings([FromQuery] ListHoldingsRequest request, CancellationToken ct)

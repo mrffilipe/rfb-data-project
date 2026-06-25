@@ -1,7 +1,11 @@
 export type { PagedResult, ProblemDetails } from './common'
 export type {
   CompanyDetail,
+  CompanyExportResult,
+  CompanyExportStats,
   CompanySummary,
+  ExportListCompaniesParams,
+  ExportSearchCompaniesParams,
   ListCompaniesParams,
   ListHoldingsParams,
   SearchCompaniesParams,

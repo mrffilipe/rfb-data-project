@@ -82,7 +82,7 @@ export function CompanyExportPanel<TParams>({
             value={limit}
             onChange={(event) => setLimit(event.target.value)}
             slotProps={{ htmlInput: { min: 1, max: 10_000 } }}
-            helperText="Leads com e-mail (padrão: 100)."
+            helperText="Leads de sócios com e-mail (padrão: 100)."
             fullWidth
             disabled={disabled || loading}
           />
@@ -95,11 +95,11 @@ export function CompanyExportPanel<TParams>({
             disabled={disabled || loading}
           />
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-            Apenas empresas com e-mail são exportadas. A quantidade refere-se a leads com e-mail.
+            A exportação gera leads de sócios vinculados às empresas encontradas.
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-            Com deduplicação ativa, e-mails repetidos são ignorados até atingir a quantidade
-            solicitada.
+            A quantidade refere-se a sócios com e-mail; com deduplicação ativa, sócios com e-mail
+            repetido podem ser removidos para manter e-mails únicos.
           </Typography>
         </FormGridItem>
       </FormGrid>

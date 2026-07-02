@@ -5,6 +5,11 @@ public static class CompanyExportColumns
     public static readonly string[] All =
     [
         "cnpj",
+        "nome_socio",
+        "cnpj_cpf_socio",
+        "identificador_socio",
+        "qualificacao_socio",
+        "data_entrada_sociedade",
         "razao_social",
         "nome_fantasia",
         "natureza_juridica",

@@ -61,7 +61,7 @@ export function formatExportStats(stats: CompanyExportResult['stats']): string {
   const parts = [
     `${stats.scannedCount} analisados`,
     `${stats.duplicateEmailSkippedCount} duplicados ignorados`,
-    `${stats.exportedCount} exportados (com e-mail)`,
+    `${stats.exportedCount} leads/sócios exportados (com e-mail)`,
   ]
 
   if (stats.withoutEmailCount > 0) {

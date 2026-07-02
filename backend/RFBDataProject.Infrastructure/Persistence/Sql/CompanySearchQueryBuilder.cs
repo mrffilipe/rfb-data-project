@@ -79,6 +79,11 @@ public static class CompanySearchQueryBuilder
 
     private const string ExportSelectColumns = """
         SELECT base.cnpj_basico || base.cnpj_ordem || base.cnpj_dv AS cnpj,
+               base.nome_socio AS nome_socio,
+               base.cnpj_cpf_socio AS cnpj_cpf_socio,
+               base.identificador_socio AS identificador_socio,
+               base.qualificacao_socio AS qualificacao_socio,
+               base.data_entrada_sociedade AS data_entrada_sociedade,
                base.razao_social AS razao_social,
                base.nome_fantasia AS nome_fantasia,
                base.natureza_juridica AS natureza_juridica,
@@ -121,6 +126,11 @@ public static class CompanySearchQueryBuilder
         e.ddd_1,
         e.telefone_1,
         e.execution_id,
+        p.nome_socio,
+        p.cnpj_cpf_socio,
+        p.identificador_socio,
+        p.qualificacao_socio,
+        p.data_entrada_sociedade,
         c.razao_social,
         c.natureza_juridica,
         c.capital_social,
@@ -147,14 +157,16 @@ public static class CompanySearchQueryBuilder
                 FROM receita_estabelecimento_staging e
                 INNER JOIN receita_empresa_staging c
                     ON c.cnpj_basico = e.cnpj_basico AND c.execution_id = e.execution_id
+                INNER JOIN receita_socio_staging p
+                    ON p.cnpj_basico = e.cnpj_basico AND p.execution_id = e.execution_id
                 WHERE {where}
-                ORDER BY e.cnpj_basico, e.cnpj_ordem
+                ORDER BY e.cnpj_basico, e.cnpj_ordem, p.nome_socio
                 LIMIT @limit OFFSET @offset
             )
             {ExportSelectColumns}
             FROM page_estab base
             {ExportLookupJoins}
-            ORDER BY base.cnpj_basico, base.cnpj_ordem
+            ORDER BY base.cnpj_basico, base.cnpj_ordem, base.nome_socio
             """;
 
         return new CompanySearchQuery
@@ -203,14 +215,16 @@ public static class CompanySearchQueryBuilder
                 FROM receita_estabelecimento_staging e
                 INNER JOIN receita_empresa_staging c
                     ON c.cnpj_basico = e.cnpj_basico AND c.execution_id = e.execution_id
+                INNER JOIN receita_socio_staging p
+                    ON p.cnpj_basico = e.cnpj_basico AND p.execution_id = e.execution_id
                 WHERE {where}
-                ORDER BY e.cnpj_basico, e.cnpj_ordem
+                ORDER BY e.cnpj_basico, e.cnpj_ordem, p.nome_socio
                 LIMIT @limit OFFSET @offset
             )
             {ExportSelectColumns}
             FROM page_estab base
             {ExportLookupJoins}
-            ORDER BY base.cnpj_basico, base.cnpj_ordem
+            ORDER BY base.cnpj_basico, base.cnpj_ordem, base.nome_socio
             """;
 
         return new CompanySearchQuery
@@ -244,6 +258,8 @@ public static class CompanySearchQueryBuilder
             FROM receita_estabelecimento_staging e
             INNER JOIN receita_empresa_staging c
                 ON c.cnpj_basico = e.cnpj_basico AND c.execution_id = e.execution_id
+            INNER JOIN receita_socio_staging p
+                ON p.cnpj_basico = e.cnpj_basico AND p.execution_id = e.execution_id
             """;
 
         var selectSql = $"""
@@ -268,13 +284,13 @@ public static class CompanySearchQueryBuilder
             ),
             page AS (
                 SELECT * FROM combined
-                ORDER BY cnpj_basico, cnpj_ordem
+                ORDER BY cnpj_basico, cnpj_ordem, nome_socio
                 LIMIT @limit OFFSET @offset
             )
             {ExportSelectColumns}
             FROM page base
             {ExportLookupJoins}
-            ORDER BY base.cnpj_basico, base.cnpj_ordem
+            ORDER BY base.cnpj_basico, base.cnpj_ordem, base.nome_socio
             """;
 
         return new CompanySearchQuery
